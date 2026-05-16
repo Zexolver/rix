@@ -4,6 +4,7 @@ pub mod discovery;
 pub mod writer;
 pub mod system;
 pub mod ops;
+pub mod verify;
 
 use std::fs;
 use std::path::PathBuf;
@@ -27,7 +28,12 @@ impl RixContext {
         Self { home_manager_dir }
     }
 
+    pub fn verify_system(&self) -> Result<(), RixError> {
+        verify::check_system_sanity()
+    }
+
     pub fn initialize_layout(&self) -> Result<(), RixError> {
+        self.verify_system()?;
         fs::create_dir_all(self.home_manager_dir.join("groups/upstream"))?;
         fs::create_dir_all(self.home_manager_dir.join("groups/local"))?;
         Ok(())
@@ -35,7 +41,11 @@ impl RixContext {
 
     pub fn add_package(&self, package: Package) -> Result<(), RixError> {
         self.initialize_layout()?;
-        ops::add_package(&self.home_manager_dir.join("groups/upstream"), package)
+        let target_file = self.home_manager_dir.join(format!("groups/upstream/{}.nix", package.group));
+        ops::add_package(&self.home_manager_dir.join("groups/upstream"), package)?;
+        
+        // Safety lock: Verify what we wrote didn't break Nix structural constraints
+        verify::verify_nix_syntax(&target_file)
     }
 
     pub fn lookup_packages(&self, query: &str) -> Result<Vec<FoundPackage>, RixError> {
@@ -47,7 +57,9 @@ impl RixContext {
     }
 
     pub fn remove_package_from_file(&self, name: &str, file_path: &PathBuf) -> Result<(), RixError> {
-        ops::remove_package_from_file(name, file_path)
+        ops::remove_package_from_file(name, file_path)?;
+        // Safety lock
+        verify::verify_nix_syntax(file_path)
     }
 
     pub fn purge_group_profile(&self, group: &str) -> Result<(), RixError> {
@@ -59,10 +71,12 @@ impl RixContext {
     }
 
     pub fn update_indexes(&self) -> Result<(), RixError> {
+        self.verify_system()?;
         system::update_indexes()
     }
 
     pub fn apply_upgrade(&self) -> Result<(), RixError> {
+        self.verify_system()?;
         system::apply_upgrade()
     }
 }
