@@ -25,3 +25,28 @@ pub fn compile_custom_flake(_source: RecipeSource, _local_groups_dir: &Path) -> 
     // and evaluating desktop application GL configurations.
     Ok("placeholder_package_name".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_recipe_source_routing() {
+        assert_eq!(
+            determine_recipe_source("bat"),
+            RecipeSource::StandardChannel
+        );
+        assert_eq!(
+            determine_recipe_source("./local/recipe-folder"),
+            RecipeSource::LocalDirectory("./local/recipe-folder".to_string())
+        );
+        assert_eq!(
+            determine_recipe_source("github:RockinChaos/Shiru"),
+            RecipeSource::RemoteGit("github:RockinChaos/Shiru".to_string())
+        );
+        assert_eq!(
+            determine_recipe_source("https://github.com/test/repo.git"),
+            RecipeSource::RemoteGit("https://github.com/test/repo.git".to_string())
+        );
+    }
+}
