@@ -4,34 +4,54 @@ use std::env;
 use std::path::PathBuf;
 use clap::Parser;
 use rix_core::{Package, RixContext};
+use args::{Commands, ProfileCommands};
 
 fn main() {
     let cli = args::Cli::parse();
-
-    // Dynamically find user's home configuration directory (fallback to ~/.config)
     let home_dir = env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
-    let home_manager_dir = home_dir.join(".config/home-manager");
-
-    // Initialize the core library engine context
-    let ctx = RixContext::new(home_manager_dir);
+    let ctx = RixContext::new(home_dir.join(".config/home-manager"));
 
     match cli.command {
-        args::Commands::Install { name, group, description } => {
+        // Path A: Beginner 'install' syntax
+        Commands::Install { name, group, description } => {
             let package = Package {
-                name: name.clone(),
+                name,
                 description,
-                group: group.clone(),
+                group,
                 is_local_recipe: false,
             };
+            execute_add(&ctx, package);
+        }
 
-            println!("Installing '{}' into group '{}'...", name, group);
+        // Path B: Intermediate 'profile add' syntax
+        Commands::Profile(ProfileCommands::Add { installable, description }) => {
+            let (target, group) = installable.split_once('@').unwrap_or((&installable, "default"));
+            let package_name = target.split_once('#').map(|(_, pkg)| pkg).unwrap_or(target);
 
-            if let Err(e) = ctx.add_package(package) {
-                eprintln!("Error executing install: {:?}", e);
-                std::process::exit(1);
-            }
+            let package = Package {
+                name: package_name.to_string(),
+                description,
+                group: group.to_string(),
+                is_local_recipe: target.contains(':'),
+            };
+            execute_add(&ctx, package);
+        }
 
-            println!("Successfully added '{}' and optimized profile structure!", name);
+        // Placeholders for removal commands
+        Commands::Remove { name } => {
+            println!("Beginner removal sequence for '{}' coming up!", name);
+        }
+        Commands::Profile(ProfileCommands::Remove { installable }) => {
+            println!("Intermediate removal sequence for '{}' coming up!", installable);
         }
     }
+}
+
+fn execute_add(ctx: &RixContext, package: Package) {
+    println!("Syncing '{}' into target profile group '{}'...", package.name, package.group);
+    if let Err(e) = ctx.add_package(package) {
+        eprintln!("Operation failed: {:?}", e);
+        std::process::exit(1);
+    }
+    println!("Successfully optimized environment config changes!");
 }

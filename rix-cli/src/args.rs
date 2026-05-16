@@ -9,17 +9,42 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Install a package into a specific upstream profile group
+    /// [Beginner] Install an upstream package directly (e.g., 'rix install eza')
     Install {
-        /// Name of the package to install (e.g., ripgrep, eza)
+        /// Name of the package to install
         name: String,
-
-        /// The category profile group file to place the package in
+        /// Profile group to place the package in
         #[arg(short, long, default_value = "default")]
         group: String,
-
-        /// An optional descriptive comment explaining what this package does
+        /// Custom description comment
         #[arg(short, long)]
         description: Option<String>,
+    },
+
+    /// [Beginner] Remove a package cleanly (e.g., 'rix remove eza')
+    Remove {
+        /// Name of the package to remove
+        name: String,
+    },
+
+    /// [Intermediate] Native Nix-style profile manipulation interface
+    #[command(subcommand)]
+    Profile(ProfileCommands),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ProfileCommands {
+    /// Add an installable target (e.g., 'rix profile add nixpkgs#eza@system')
+    Add {
+        /// Installable target target string
+        installable: String,
+        /// Custom description comment
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+    /// Remove an installable target
+    Remove {
+        /// Installable target to remove
+        installable: String,
     },
 }
