@@ -35,8 +35,25 @@ impl RixContext {
 
     pub fn initialize_layout(&self) -> Result<(), RixError> {
         self.verify_system()?;
-        fs::create_dir_all(self.home_manager_dir.join("groups/upstream"))?;
-        fs::create_dir_all(self.home_manager_dir.join("groups/local"))?;
+        
+        let upstream_dir = self.home_manager_dir.join("groups/upstream");
+        let local_dir = self.home_manager_dir.join("groups/local");
+        
+        fs::create_dir_all(&upstream_dir)?;
+        fs::create_dir_all(&local_dir)?;
+
+        // Deploy the master tracking flake if it doesn't already exist
+        let flake_path = self.home_manager_dir.join("flake.nix");
+        if !flake_path.exists() {
+            writer::write_content_to_file(&flake_path, writer::get_bootstrap_flake_template())?;
+        }
+
+        // Deploy a default upstream profile tracking group file if missing
+        let default_upstream = upstream_dir.join("default.nix");
+        if !default_upstream.exists() {
+            writer::write_content_to_file(&default_upstream, writer::get_empty_group_template())?;
+        }
+
         Ok(())
     }
 
