@@ -1,39 +1,66 @@
+use std::fs;
+use std::io;
 use std::path::PathBuf;
 
-/// Represents a package managed by Rix
+/// Custom error types for Rix engine operations
+#[derive(Debug)]
+pub enum RixError {
+    Io(io::Error),
+    ParseError(String),
+    PackageNotFound(String),
+}
+
+impl From<io::Error> for RixError {
+    fn from(err: io::Error) -> Self {
+        RixError::Io(err)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Package {
     pub name: String,
     pub description: Option<String>,
     pub group: String,
+    pub is_local_recipe: bool,
 }
 
-/// Core configuration layout engine for Rix
 pub struct RixContext {
-    /// Path to user's home-manager configuration directory (e.g. ~/.config/home-manager)
     pub home_manager_dir: PathBuf,
-    /// Path to local custom flakes store (e.g. ~/.config/rix/local-packages)
-    pub local_store_dir: PathBuf,
 }
 
 impl RixContext {
-    pub fn new(home_manager_dir: PathBuf, local_store_dir: PathBuf) -> Self {
-        Self {
-            home_manager_dir,
-            local_store_dir,
+    pub fn new(home_manager_dir: PathBuf) -> Self {
+        Self { home_manager_dir }
+    }
+
+    /// Ensures the basic directory structure exists layout-wise
+    pub fn initialize_layout(&self) -> Result<(), RixError> {
+        let upstream_dir = self.home_manager_dir.join("groups/upstream");
+        let local_dir = self.home_manager_dir.join("groups/local");
+
+        fs::create_dir_all(&upstream_dir)?;
+        fs::create_dir_all(&local_dir)?;
+
+        Ok(())
+    }
+
+    /// Generates a blank group configuration file with structural educational comments
+    pub fn create_empty_upstream_group(&self, group_name: &str) -> Result<PathBuf, RixError> {
+        let file_path = self.home_manager_dir.join(format!("groups/upstream/{}.nix", group_name));
+        
+        if !file_path.exists() {
+            let initial_template = String::from(
+                "# This Nix module defines an isolated package group profile.\n\
+                 # It is structured as a function accepting 'pkgs' (the Nix package collection)\n\
+                 # and outputs a flat list containing package derivations.\n\
+                 { pkgs, ... }:\n\n\
+                 [\n\
+                   # --- Managed by Rix: Packaged Tools ---\n\
+                 ]\n"
+            );
+            fs::write(&file_path, initial_template)?;
         }
-    }
 
-    /// Appends a package to a group file using `rnix` to parse/format, 
-    /// attaches descriptive comments, and sorts the file alphabetically.
-    pub fn add_package(&self, package: Package) -> Result<(), String> {
-        // TODO: Implement rnix parsing, alphabetical sorting, and comment generation
-        unimplemented!()
-    }
-
-    /// Searches for a package locally or via system channels to evaluate if nix-init is required
-    pub fn resolve_package_source(&self, query: &str) -> Result<Package, String> {
-        // TODO: Query channels or execute nix-init fallback pipelines
-        unimplemented!()
+        Ok(file_path)
     }
 }
