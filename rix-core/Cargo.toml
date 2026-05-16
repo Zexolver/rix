@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 rnix = "0.11"
 rowan = "0.15"
+
+[dev-dependencies]
+tempfile = "3.10.0"
