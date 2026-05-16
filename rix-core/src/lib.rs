@@ -2,6 +2,8 @@ pub mod errors;
 pub mod parser;
 pub mod discovery;
 pub mod writer;
+pub mod system;
+pub mod ops;
 
 use std::fs;
 use std::path::PathBuf;
@@ -33,34 +35,8 @@ impl RixContext {
 
     pub fn add_package(&self, package: Package) -> Result<(), RixError> {
         self.initialize_layout()?;
-        let file_path = self.home_manager_dir.join(format!("groups/upstream/{}.nix", package.group));
-        
-        if !file_path.exists() {
-            fs::write(&file_path, "{ pkgs, ... }:\n\n[\n]\n")?;
-        }
-        
-        let content = fs::read_to_string(&file_path)?;
-        let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
-        let list_node = parser::find_list_node(&root_node)
-            .ok_or_else(|| RixError::ParseError("No list block [ ... ] found".to_string()))?;
-
-        let mut packages = parser::extract_packages_from_list(&list_node);
-        let formatted_pkg = format!("pkgs.{}", package.name);
-
-        // Idempotency update tweak: if package exists, replace its description instead of ignoring it
-        if let Some(pos) = packages.iter().position(|(name, _)| name == &formatted_pkg) {
-            if let Some(new_desc) = package.description {
-                packages[pos].1 = new_desc;
-                return writer::write_nix_file(&file_path, packages);
-            }
-            return Ok(());
-        }
-
-        let comment = package.description.unwrap_or_else(|| "Installed via Rix CLI".to_string());
-        packages.push((formatted_pkg, comment));
-        packages.sort_by(|a, b| a.0.cmp(&b.0));
-
-        writer::write_nix_file(&file_path, packages)
+        let upstream_dir = self.home_manager_dir.join("groups/upstream");
+        ops::add_package(&upstream_dir, package)
     }
 
     pub fn lookup_packages(&self, query: &str) -> Result<Vec<FoundPackage>, RixError> {
@@ -68,7 +44,6 @@ impl RixContext {
         discovery::find_packages_in_upstream(&upstream_dir, query)
     }
 
-    /// Pulls out absolutely every package tracking element for a comprehensive inventory printout
     pub fn list_all_packages(&self) -> Result<Vec<(String, String, String)>, RixError> {
         let upstream_dir = self.home_manager_dir.join("groups/upstream");
         let mut all_packages = Vec::new();
@@ -95,18 +70,22 @@ impl RixContext {
     }
 
     pub fn remove_package_from_file(&self, name: &str, file_path: &PathBuf) -> Result<(), RixError> {
-        let content = fs::read_to_string(file_path)?;
-        let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
-        let list_node = parser::find_list_node(&root_node)
-            .ok_or_else(|| RixError::ParseError("No list block [ ... ] found".to_string()))?;
+        ops::remove_package_from_file(name, file_path)
+    }
 
-        let formatted_pkg = format!("pkgs.{}", name);
-        let packages = parser::extract_packages_from_list(&list_node);
-        let filtered_packages: Vec<(String, String)> = packages
-            .into_iter()
-            .filter(|(pkg_name, _)| pkg_name != &formatted_pkg)
-            .collect();
+    pub fn purge_group_profile(&self, group: &str) -> Result<(), RixError> {
+        let file_path = self.home_manager_dir.join(format!("groups/upstream/{}.nix", group));
+        if file_path.exists() {
+            fs::remove_file(file_path)?;
+        }
+        Ok(())
+    }
 
-        writer::write_nix_file(file_path, filtered_packages)
+    pub fn update_indexes(&self) -> Result<(), RixError> {
+        system::update_indexes()
+    }
+
+    pub fn apply_upgrade(&self) -> Result<(), RixError> {
+        system::apply_upgrade()
     }
 }

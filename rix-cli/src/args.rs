@@ -27,6 +27,18 @@ pub enum Commands {
         name: String,
     },
 
+    /// [Beginner] Purge an entire package profile group configuration file
+    Purge {
+        /// Name of the group profile file to wipe out
+        group: String,
+    },
+
+    /// [Beginner] Update local channel indices tracking records
+    Update,
+
+    /// [Beginner] Upgrade environment generations to match declaration arrays
+    Upgrade,
+
     /// List all currently managed packages across environment profile groups
     List,
 
