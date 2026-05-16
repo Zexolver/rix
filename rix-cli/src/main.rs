@@ -29,6 +29,23 @@ fn main() {
             let package_name = target.split_once('#').map(|(_, pkg)| pkg).unwrap_or(target);
             handle_interactive_removal(&ctx, package_name);
         }
+        Commands::List => {
+            match ctx.list_all_packages() {
+                Ok(packages) => {
+                    if packages.is_empty() {
+                        println!("No declarative environment packages tracked yet.");
+                        return;
+                    }
+                    println!("\n{:<15} {:<15} {}", "PACKAGE", "GROUP", "DESCRIPTION");
+                    println!("{}", "-".repeat(60));
+                    for (name, group, comment) in packages {
+                        println!("{:<15} {:<15} {}", name, group, comment);
+                    }
+                    println!();
+                }
+                Err(e) => { eprintln!("Failed to retrieve packages: {:?}", e); std::process::exit(1); }
+            }
+        }
     }
 }
 

@@ -27,6 +27,9 @@ pub enum Commands {
         name: String,
     },
 
+    /// List all currently managed packages across environment profile groups
+    List,
+
     /// [Intermediate] Native Nix-style profile manipulation interface
     #[command(subcommand)]
     Profile(ProfileCommands),

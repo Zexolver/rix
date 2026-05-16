@@ -14,7 +14,7 @@ pub fn find_list_node(node: &SyntaxNode) -> Option<SyntaxNode> {
     None
 }
 
-/// Helper method to safely crawl the list AST node and collect strings/comments
+/// Safely crawl the list AST node, extracting package names and their trailing inline comments
 pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String)> {
     let mut items = Vec::new();
     
@@ -22,7 +22,26 @@ pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String
         if child.kind() == SyntaxKind::NODE_SELECT {
             let text = child.text().to_string().trim().to_string();
             if text.starts_with("pkgs.") {
-                items.push((text, "System utility package".to_string()));
+                let mut current_sibling = child.next_sibling_or_token();
+                let mut found_comment = String::from("Managed via Rix");
+
+                while let Some(sibling) = current_sibling {
+                    if sibling.kind() == SyntaxKind::NODE_SELECT {
+                        break;
+                    }
+                    if sibling.kind() == SyntaxKind::TOKEN_COMMENT {
+                        // Extract text directly from the token variant inside NodeOrToken
+                        if let Some(token) = sibling.as_token() {
+                            let cleaned = token.text().trim_start_matches('#').trim().to_string();
+                            if !cleaned.is_empty() {
+                                found_comment = cleaned;
+                            }
+                        }
+                        break;
+                    }
+                    current_sibling = sibling.next_sibling_or_token();
+                }
+                items.push((text, found_comment));
             }
         }
     }
