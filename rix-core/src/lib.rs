@@ -1,9 +1,12 @@
 pub mod errors;
 pub mod parser;
+pub mod discovery;
+pub mod writer;
 
 use std::fs;
 use std::path::PathBuf;
 pub use errors::RixError;
+pub use discovery::FoundPackage;
 
 #[derive(Debug, Clone)]
 pub struct Package {
@@ -23,29 +26,20 @@ impl RixContext {
     }
 
     pub fn initialize_layout(&self) -> Result<(), RixError> {
-        let upstream_dir = self.home_manager_dir.join("groups/upstream");
-        let local_dir = self.home_manager_dir.join("groups/local");
-        fs::create_dir_all(upstream_dir)?;
-        fs::create_dir_all(local_dir)?;
+        fs::create_dir_all(self.home_manager_dir.join("groups/upstream"))?;
+        fs::create_dir_all(self.home_manager_dir.join("groups/local"))?;
         Ok(())
-    }
-
-    pub fn create_empty_upstream_group(&self, group_name: &str) -> Result<PathBuf, RixError> {
-        let file_path = self.home_manager_dir.join(format!("groups/upstream/{}.nix", group_name));
-        if !file_path.exists() {
-            let initial_template = String::from(
-                "{ pkgs, ... }:\n\n[\n  # --- Managed by Rix: Packaged Tools ---\n]\n"
-            );
-            fs::write(&file_path, initial_template)?;
-        }
-        Ok(file_path)
     }
 
     pub fn add_package(&self, package: Package) -> Result<(), RixError> {
         self.initialize_layout()?;
-        let file_path = self.create_empty_upstream_group(&package.group)?;
+        let file_path = self.home_manager_dir.join(format!("groups/upstream/{}.nix", package.group));
+        
+        if !file_path.exists() {
+            fs::write(&file_path, "{ pkgs, ... }:\n\n[\n]\n")?;
+        }
+        
         let content = fs::read_to_string(&file_path)?;
-
         let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
         let list_node = parser::find_list_node(&root_node)
             .ok_or_else(|| RixError::ParseError("No list block [ ... ] found".to_string()))?;
@@ -61,13 +55,27 @@ impl RixContext {
         packages.push((formatted_pkg, comment));
         packages.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut new_content = String::from("{ pkgs, ... }:\n\n[\n");
-        for (pkg_name, pkg_comment) in packages {
-            new_content.push_str(&format!("  {} # {}\n", pkg_name, pkg_comment));
-        }
-        new_content.push_str("]\n");
+        writer::write_nix_file(&file_path, packages)
+    }
 
-        fs::write(&file_path, new_content)?;
-        Ok(())
+    pub fn lookup_packages(&self, query: &str) -> Result<Vec<FoundPackage>, RixError> {
+        let upstream_dir = self.home_manager_dir.join("groups/upstream");
+        discovery::find_packages_in_upstream(&upstream_dir, query)
+    }
+
+    pub fn remove_package_from_file(&self, name: &str, file_path: &PathBuf) -> Result<(), RixError> {
+        let content = fs::read_to_string(file_path)?;
+        let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
+        let list_node = parser::find_list_node(&root_node)
+            .ok_or_else(|| RixError::ParseError("No list block [ ... ] found".to_string()))?;
+
+        let formatted_pkg = format!("pkgs.{}", name);
+        let packages = parser::extract_packages_from_list(&list_node);
+        let filtered_packages: Vec<(String, String)> = packages
+            .into_iter()
+            .filter(|(pkg_name, _)| pkg_name != &formatted_pkg)
+            .collect();
+
+        writer::write_nix_file(file_path, filtered_packages)
     }
 }
