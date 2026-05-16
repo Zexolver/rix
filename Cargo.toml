@@ -1,0 +1,7 @@
+# /Cargo.toml
+[workspace]
+members = [
+    "rix-core",
+    "rix-cli",
+]
+resolver = "2"
