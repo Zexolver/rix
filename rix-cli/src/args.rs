@@ -21,6 +21,12 @@ pub enum Commands {
         description: Option<String>,
     },
 
+    /// [Beginner] Search online package indices directly via the modern flake registry
+    Search {
+        /// The package name or keyword to search for
+        query: String,
+    },
+
     /// [Beginner] Remove a package cleanly (e.g., 'rix remove eza')
     Remove {
         /// Name of the package to remove

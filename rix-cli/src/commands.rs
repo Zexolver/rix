@@ -15,13 +15,36 @@ pub fn handle(cli: Cli, ctx: RixContext) {
                         group, 
                         is_local_recipe: false 
                     });
-                    
+                                        
                     if let Err(e) = ctx.apply_upgrade() {
                         eprintln!("Failed to apply target updates to environment: {:?}", e);
                     }
                 }
                 Err(e) => {
                     eprintln!("{:?}", e); 
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Search { query } => {
+            println!("Querying modern Flake registry matching '{}'...", query);
+            match rix_core::verify::run_nix_search(&query) {
+                Ok(results) => {
+                    if results.is_empty() {
+                        println!("No packages matched your query.");
+                    } else {
+                        println!("\n{:<40} {}", "PACKAGE ATTRIBUTE PATH", "DESCRIPTION");
+                        println!("{}", "-".repeat(80));
+                        for (path, desc) in results {
+                            // Safely isolate package sub-attribute keys (e.g., legacyPackages.aarch64-linux.fastfetch -> fastfetch)
+                            let short_path = path.splitn(3, '.').nth(2).unwrap_or(&path);
+                            println!("{:<40} {}", short_path, desc);
+                        }
+                        println!();
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Search sequence broken: {:?}", e);
                     std::process::exit(1);
                 }
             }
