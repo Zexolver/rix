@@ -1,55 +1,6 @@
 use std::process::Command;
 use std::path::Path;
-use std::fs;
 use crate::errors::RixError;
-
-pub enum TargetPlatform {
-    NixOS,
-    LinuxX86_64,
-    LinuxARM64,
-    MacOS,
-}
-
-/// Dynamic live probe to identify the operating system environment and architecture profile
-pub fn detect_target_platform() -> TargetPlatform {
-    if cfg!(target_os = "macos") {
-        return TargetPlatform::MacOS;
-    }
-
-    if Path::new("/etc/NIXOS").exists() || Path::new("/run/current-system").exists() {
-        return TargetPlatform::NixOS;
-    }
-
-    if cfg!(target_arch = "aarch64") {
-        TargetPlatform::LinuxARM64
-    } else {
-        TargetPlatform::LinuxX86_64
-    }
-}
-
-/// Identifies the live hardware graphics driver stack on non-NixOS Linux machines
-pub fn detect_live_gpu_driver() -> String {
-    if Path::new("/proc/driver/nvidia/version").exists() {
-        return "nixGLNvidia".to_string();
-    }
-    
-    // Check up to three distinct card entries to accommodate composite SoC nodes (like Chromebooks)
-    for card_idx in 0..3 {
-        let symlink_path = format!("/sys/class/drm/card{}/device/driver", card_idx);
-        if let Ok(target) = fs::read_link(symlink_path) {
-            let driver_name = target.file_name().unwrap_or_default().to_string_lossy();
-            if driver_name == "panfrost" || driver_name == "lima" {
-                return "nixGLMesa".to_string();
-            }
-        }
-    }
-
-    if Path::new("/sys/class/drm/renderD128").exists() && cfg!(target_arch = "aarch64") {
-        return "nixGLMesa".to_string();
-    }
-
-    "nixGLDefault".to_string()
-}
 
 pub fn check_system_sanity() -> Result<(), RixError> {
     let binaries = ["nix-env", "nix-instantiate"];
@@ -88,5 +39,37 @@ pub fn verify_nix_syntax(file_path: &Path) -> Result<(), RixError> {
             )))
         }
         Err(_) => Err(RixError::ParseError("Could not execute syntax validator".to_string())),
+    }
+}
+
+pub fn verify_online_package_architecture(package_name: &str) -> Result<String, RixError> {
+    let client = reqwest::blocking::Client::new();
+    let url = "https://search.nixos.org/backend/nixpkgs/_search";
+
+    let query = serde_json::json!({
+        "query": {
+            "bool": {
+                "must": [{ "match": { "package_attr_name": package_name } }],
+                "filter": [{ "term": { "package_systems": "aarch64-linux" } }]
+            }
+        },
+        "size": 1
+    });
+
+    let res = client.post(url).json(&query).send()
+        .map_err(|e| RixError::ParseError(format!("Network lookup error: {}", e)))?;
+
+    let body: serde_json::Value = res.json()
+        .map_err(|e| RixError::ParseError(format!("Malformed API tracking packet: {}", e)))?;
+
+    if let Some(hit) = body["hits"]["hits"].get(0) {
+        let attr_name = hit["_source"]["package_attr_name"].as_str()
+            .ok_or_else(|| RixError::ParseError("Missing package attribute identification tracking".to_string()))?;
+        Ok(attr_name.to_string())
+    } else {
+        Err(RixError::ParseError(format!(
+            "Package '{}' was not found or is incompatible with your CPU architecture (aarch64-linux).", 
+            package_name
+        )))
     }
 }
