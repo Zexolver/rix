@@ -49,4 +49,12 @@ pub fn handle_interactive_removal(ctx: &RixContext, query: &str) {
         std::process::exit(1);
     }
     println!("Successfully stripped tool tracking from profile configuration!");
+
+    // Apply configuration updates to the active live generation environment automatically
+    println!("Synchronizing environmental generational upgrades...");
+    if let Err(e) = ctx.apply_upgrade() {
+        eprintln!("Failed to realize system environment state changes: {:?}", e);
+        std::process::exit(1);
+    }
+    println!("Environment configuration synchronized successfully!");
 }
