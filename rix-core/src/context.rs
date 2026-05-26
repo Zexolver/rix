@@ -36,7 +36,7 @@ impl RixContext {
 
         let flake_path = self.config_dir.join("flake.nix");
         if !flake_path.exists() {
-            writer::write_content_to_file(&flake_path, writer::get_bootstrap_flake_template())?;
+            writer::write_content_to_file(&flake_path, &writer::get_bootstrap_flake_template())?;
         }
 
         let default_upstream = upstream_dir.join("default.nix");
