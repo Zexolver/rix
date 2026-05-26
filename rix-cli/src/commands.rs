@@ -5,6 +5,9 @@ use crate::ui;
 
 pub fn handle(cli: Cli, ctx: RixContext) {
     match cli.command {
+        Commands::Init => {
+            handlers::execute_init(&ctx);
+        }
         Commands::Install { name, group, description } => {
             println!("Searching online package indices for '{}'...", name);
             match rix_core::verify::verify_online_package_architecture(&name) {

@@ -1,6 +1,31 @@
 use std::io::{self, Write};
 use rix_core::{Package, RixContext, FoundPackage};
 
+pub fn execute_init(ctx: &RixContext) {
+    println!("Initializing modern declarative Nix profile environment...");
+    
+    // Check if a layout already exists by verifying the root flake configuration path
+    let flake_path = ctx.config_dir.join("flake.nix");
+    if flake_path.exists() {
+        println!("✨ Environment workspace layout is already fully initialized at: {}", ctx.config_dir.display());
+        return;
+    }
+
+    match ctx.initialize_layout() {
+        Ok(_) => {
+            println!("🎉 Successfully generated file layout structural scaffolding!");
+            println!("   ↳ Configuration directory: {}", ctx.config_dir.display());
+            println!("   ↳ Base declarative flake: {}/flake.nix", ctx.config_dir.display());
+            println!("   ↳ Default group template: {}/groups/upstream/default.nix", ctx.config_dir.display());
+            println!("\nYou are ready to optimize! Try installing your first tool: 'rix install fastfetch'");
+        }
+        Err(e) => {
+            eprintln!("Initialization failed: {:?}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn execute_add(ctx: &RixContext, package: Package) {
     println!("Syncing '{}' into target profile group '{}'...", package.name, package.group);
     if let Err(e) = ctx.add_package(package) {

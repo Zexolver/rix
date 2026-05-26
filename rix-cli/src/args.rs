@@ -9,6 +9,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
+    /// [Beginner] Initialize a new declarative Nix environment profile layout scaffolding
+    Init,
+
     /// [Beginner] Install an upstream package directly (e.g., 'rix install eza')
     Install {
         /// Name of the package to install
