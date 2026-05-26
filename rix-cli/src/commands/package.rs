@@ -24,7 +24,7 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
     }
 }
 
-pub fn handle_search(ctx: &RixContext, query: String) {
+pub fn handle_search(_ctx: &RixContext, query: String) {
     let spinner = ui::create_spinner("Querying modern Flake registry...");
     
     match rix_core::verify::run_nix_search(&query) {
