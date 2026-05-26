@@ -27,9 +27,14 @@ pub fn handle(cli: Cli, ctx: RixContext) {
             }
         }
         Commands::Search { query } => {
-            println!("Querying modern Flake registry matching '{}'...", query);
+            // Initialize the spinner loader right here
+            let spinner = ui::create_spinner("Querying modern Flake registry...");
+            
             match rix_core::verify::run_nix_search(&query) {
                 Ok(results) => {
+                    // Wipe the spinner cleanly off the terminal before layout printing
+                    spinner.finish_and_clear();
+
                     if results.is_empty() {
                         println!("No packages matched your query.");
                     } else {
@@ -44,6 +49,7 @@ pub fn handle(cli: Cli, ctx: RixContext) {
                     }
                 }
                 Err(e) => {
+                    spinner.finish_and_clear();
                     eprintln!("Search sequence broken: {:?}", e);
                     std::process::exit(1);
                 }
