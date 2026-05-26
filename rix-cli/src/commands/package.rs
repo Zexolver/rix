@@ -3,9 +3,15 @@ use crate::handlers;
 use crate::ui;
 
 pub fn handle_install(ctx: &RixContext, name: String, group: String, description: Option<String>) {
-    println!("Searching online package indices for '{}'...", name);
+    // Coerce the runtime String into a &'static str so the spinner can safely hold it
+    let message = Box::leak(format!("Querying upstream package indices for '{}'...", name).into_boxed_str());
+    let spinner = ui::create_spinner(message);
+    
     match rix_core::verify::verify_online_package_architecture(&name) {
         Ok(verified_name) => {
+            // Drop the spinner completely before modifying state files or prompting for sudo
+            spinner.finish_and_clear();
+            
             handlers::execute_add(ctx, Package { 
                 name: verified_name, 
                 description, 
@@ -13,11 +19,13 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
                 is_local_recipe: false 
             });
                                 
+            println!("Applying environmental upgrade generations...");
             if let Err(e) = ctx.apply_upgrade() {
                 eprintln!("Failed to apply target updates to environment: {:?}", e);
             }
         }
         Err(e) => {
+            spinner.finish_and_clear();
             eprintln!("{:?}", e); 
             std::process::exit(1);
         }
