@@ -14,14 +14,16 @@ pub fn find_list_node(node: &SyntaxNode) -> Option<SyntaxNode> {
     None
 }
 
-/// Safely crawl the list AST node, extracting package names and their trailing inline comments
+/// Safely crawl the list AST node, extracting package names (sans prefix) and inline comments
 pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String)> {
     let mut items = Vec::new();
     
     for child in list_node.children() {
         if child.kind() == SyntaxKind::NODE_SELECT {
             let text = child.text().to_string().trim().to_string();
-            if text.starts_with("pkgs.") {
+            
+            // Strip "pkgs." so the core engine handles clean package names uniformly
+            if let Some(pkg_name) = text.strip_prefix("pkgs.") {
                 let mut current_sibling = child.next_sibling_or_token();
                 let mut found_comment = String::from("Managed via Rix");
 
@@ -30,7 +32,6 @@ pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String
                         break;
                     }
                     if sibling.kind() == SyntaxKind::TOKEN_COMMENT {
-                        // Extract text directly from the token variant inside NodeOrToken
                         if let Some(token) = sibling.as_token() {
                             let cleaned = token.text().trim_start_matches('#').trim().to_string();
                             if !cleaned.is_empty() {
@@ -41,7 +42,7 @@ pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String
                     }
                     current_sibling = sibling.next_sibling_or_token();
                 }
-                items.push((text, found_comment));
+                items.push((pkg_name.to_string(), found_comment));
             }
         }
     }

@@ -68,7 +68,7 @@ pub fn get_bootstrap_flake_template() -> String {
             home.homeDirectory = "{}";
             home.stateVersion = "24.05";
             
-            home.packages = import ./groups/default/default.nix {{ inherit pkgs; }};
+            home.packages = import ./groups/upstream/default.nix {{ inherit pkgs; }};
           }}
         ];
       }};
