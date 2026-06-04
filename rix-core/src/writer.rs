@@ -25,10 +25,35 @@ pub fn write_content_to_file(file_path: &Path, content: &str) -> Result<(), RixE
 /// Formats and serializes a collection of package tuples back into standard Nix list format
 pub fn write_nix_file(file_path: &Path, packages: Vec<(String, String)>) -> Result<(), RixError> {
     let mut content = String::from("{ pkgs, ... }:\n[\n");
+    
     for (name, description) in packages {
-        content.push_str(&format!("  pkgs.{} # {}\n", name, description));
+        // DEFENSIVE FIX: Smart prefixing.
+        // If the user manually added a complex Nix expression, raw string, or functional block, 
+        // we leave it completely intact instead of blindly destroying it with a `pkgs.` prefix.
+        let is_complex_expr = name.starts_with('(') || 
+                              name.starts_with('{') || 
+                              name.starts_with('[') || 
+                              name.starts_with('"') || 
+                              name.starts_with("let ") || 
+                              name.starts_with("with ");
+
+        let formatted_name = if is_complex_expr {
+            name.to_string()
+        } else {
+            format!("  pkgs.{}", name)
+        };
+
+        // Avoid trailing '#' syntax errors if there is no comment attached
+        if description.is_empty() {
+            content.push_str(&format!("  {}\n", formatted_name.trim_start()));
+        } else {
+            content.push_str(&format!("  {} # {}\n", formatted_name.trim_start(), description));
+        }
     }
+    
     content.push_str("]\n");
+    
+    // The final safety net: rnix will parse this reconstructed string before writing to disk
     write_content_to_file(file_path, &content)
 }
 

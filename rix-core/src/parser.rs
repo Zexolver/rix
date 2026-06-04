@@ -2,6 +2,7 @@ use rnix::{SyntaxKind, SyntaxNode};
 use rowan::ast::AstNode;
 
 /// Helper method to recursively look for a list node (`NODE_LIST`)
+/// NOTE: For simple, naked package group files, this correctly catches the main list.
 pub fn find_list_node(node: &SyntaxNode) -> Option<SyntaxNode> {
     if node.kind() == SyntaxKind::NODE_LIST {
         return Some(node.clone());
@@ -14,37 +15,42 @@ pub fn find_list_node(node: &SyntaxNode) -> Option<SyntaxNode> {
     None
 }
 
-/// Safely crawl the list AST node, extracting package names (sans prefix) and inline comments
+/// Safely crawl the list AST node, extracting package names and inline comments
 pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String)> {
     let mut items = Vec::new();
     
+    // list_node.children() only evaluates actual element sub-nodes.
+    // Every node present inside the list brackets represents an explicit package entry.
     for child in list_node.children() {
-        if child.kind() == SyntaxKind::NODE_SELECT {
-            let text = child.text().to_string().trim().to_string();
-            
-            // Strip "pkgs." so the core engine handles clean package names uniformly
-            if let Some(pkg_name) = text.strip_prefix("pkgs.") {
-                let mut current_sibling = child.next_sibling_or_token();
-                let mut found_comment = String::from("Managed via Rix");
+        let text = child.text().to_string().trim().to_string();
+        
+        // DEFENSIVE FIX: Normalize "pkgs." prefixes for internal matching logic, 
+        // but fallback to the raw text string if it's a naked identifier or custom string.
+        // This completely prevents Rix from erasing manually declared utilities.
+        let pkg_name = text.strip_prefix("pkgs.").unwrap_or(&text).to_string();
+        
+        let mut current_sibling = child.next_sibling_or_token();
+        let mut found_comment = String::from("Managed via Rix");
 
-                while let Some(sibling) = current_sibling {
-                    if sibling.kind() == SyntaxKind::NODE_SELECT {
-                        break;
-                    }
-                    if sibling.kind() == SyntaxKind::TOKEN_COMMENT {
-                        if let Some(token) = sibling.as_token() {
-                            let cleaned = token.text().trim_start_matches('#').trim().to_string();
-                            if !cleaned.is_empty() {
-                                found_comment = cleaned;
-                            }
+        while let Some(sibling) = current_sibling {
+            match sibling {
+                rowan::NodeOrToken::Node(_) => {
+                    // We've hit the next actual package element node. Stop looking for comments.
+                    break;
+                }
+                rowan::NodeOrToken::Token(token) => {
+                    if token.kind() == SyntaxKind::TOKEN_COMMENT {
+                        let cleaned = token.text().trim_start_matches('#').trim().to_string();
+                        if !cleaned.is_empty() {
+                            found_comment = cleaned;
                         }
                         break;
                     }
-                    current_sibling = sibling.next_sibling_or_token();
+                    current_sibling = token.next_sibling_or_token();
                 }
-                items.push((pkg_name.to_string(), found_comment));
             }
         }
+        items.push((pkg_name, found_comment));
     }
     items
 }
