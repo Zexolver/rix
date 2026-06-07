@@ -49,8 +49,17 @@ impl RixContext {
 
     pub fn add_package(&self, package: Package) -> Result<(), RixError> {
         self.initialize_layout()?;
-        let target_file = self.config_dir.join(format!("groups/upstream/{}.nix", package.group));
+        
+        let group_name = package.group.clone();
+        let target_file = self.config_dir.join(format!("groups/upstream/{}.nix", group_name));
+        
+        // 1. Add the package to the group module
         ops::add_package(&self.config_dir.join("groups/upstream"), package)?;
+        
+        // 2. NEW: Ensure this group is dynamically imported into the master flake.nix
+        ops::link_group_to_flake(&self.config_dir, &group_name)?;
+        
+        // 3. Verify final syntax
         verify::verify_nix_syntax(&target_file)
     }
 
@@ -80,7 +89,6 @@ impl RixContext {
         system::update_indexes()
     }
 
-    // Fixed: Now passes the config_dir argument!
     pub fn apply_upgrade(&self) -> Result<(), RixError> {
         self.verify_system()?;
         system::apply_upgrade(&self.config_dir)
