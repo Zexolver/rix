@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use crate::errors::RixError;
 use crate::{parser, writer, Package};
+use rnix::SyntaxKind;
 
 pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError> {
     let file_path = upstream_dir.join(format!("{}.nix", package.group));
@@ -10,58 +11,116 @@ pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError
         fs::write(&file_path, writer::get_empty_group_template())?;
     }
     
-    let content = fs::read_to_string(&file_path)?;
+    let mut content = fs::read_to_string(&file_path)?;
     let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
     let list_node = parser::find_list_node(&root_node)
         .ok_or_else(|| RixError::ParseError("No list block [ ... ] found in target file".to_string()))?;
 
-    // Extract existing packages (already clean names)
-    let mut packages = parser::extract_packages_from_list(&list_node);
-    
-    // Direct match check on the pure package name
+    // Check if package exists using the parser
+    let packages = parser::extract_packages_from_list(&list_node);
     if packages.iter().any(|(name, _)| name == &package.name) {
         return Ok(());  
     }
 
     let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
-    packages.push((package.name, description));
+    let formatted_pkg = format!("  pkgs.{} # {}\n", package.name, description);
 
-    // Rewrites file cleanly via AST validation path
-    writer::write_nix_file(&file_path, packages)
+    // TEXT RANGE SURGERY: Find the exact byte coordinate of the closing bracket ']'
+    let last_token = list_node.last_token()
+        .ok_or_else(|| RixError::ParseError("Could not find closing bracket of list".into()))?;
+        
+    let insert_index: usize = last_token.text_range().start().into();
+
+    // Inject the string exactly before the closing bracket
+    content.insert_str(insert_index, &formatted_pkg);
+
+    // Safety net: validate AST before writing to disk
+    writer::write_content_to_file(&file_path, &content)
 }
 
 pub fn remove_package_from_file(name: &str, file_path: &Path) -> Result<(), RixError> {
-    let content = fs::read_to_string(file_path)?;
+    let mut content = fs::read_to_string(file_path)?;
     let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
     let list_node = parser::find_list_node(&root_node)
         .ok_or_else(|| RixError::ParseError("No list block [ ... ] found".to_string()))?;
 
-    let packages = parser::extract_packages_from_list(&list_node);
-    
-    let filtered_packages: Vec<(String, String)> = packages
-        .into_iter()
-        .filter(|(pkg_name, _)| pkg_name != name)
-        .collect();
+    let mut target_range: Option<std::ops::Range<usize>> = None;
 
-    writer::write_nix_file(file_path, filtered_packages)
+    for child in list_node.children() {
+        let text = child.text().to_string().trim().to_string();
+        let pkg_name = text.strip_prefix("pkgs.").unwrap_or(&text);
+
+        if pkg_name == name {
+            let mut start_idx: usize = child.text_range().start().into();
+            let mut end_idx: usize = child.text_range().end().into();
+
+            // 1. Consume trailing whitespace and inline comments
+            let mut current_sibling = child.next_sibling_or_token();
+            while let Some(sibling) = current_sibling {
+                match sibling {
+                    rowan::NodeOrToken::Token(token) => {
+                        if token.kind() == SyntaxKind::TOKEN_COMMENT {
+                            end_idx = token.text_range().end().into();
+                        } else if token.kind() == SyntaxKind::TOKEN_WHITESPACE {
+                            end_idx = token.text_range().end().into();
+                            if token.text().contains('\n') {
+                                break; // Stop after capturing the line's trailing newline
+                            }
+                        } else {
+                            break;
+                        }
+                        current_sibling = token.next_sibling_or_token();
+                    }
+                    rowan::NodeOrToken::Node(_) => break, // Stop if we hit another package
+                }
+            }
+
+            // 2. Consume leading indentation (spaces only) so we don't leave empty blank lines
+            let mut prev_sibling = child.prev_sibling_or_token();
+            while let Some(sibling) = prev_sibling {
+                match sibling {
+                    rowan::NodeOrToken::Token(token) => {
+                        if token.kind() == SyntaxKind::TOKEN_WHITESPACE {
+                            if token.text().contains('\n') {
+                                break; // Do not consume the previous line's newline!
+                            }
+                            start_idx = token.text_range().start().into();
+                            prev_sibling = token.prev_sibling_or_token();
+                        } else {
+                            break;
+                        }
+                    }
+                    rowan::NodeOrToken::Node(_) => break,
+                }
+            }
+
+            target_range = Some(start_idx..end_idx);
+            break;
+        }
+    }
+
+    if let Some(range) = target_range {
+        // TEXT RANGE SURGERY: Slice out the exact bytes of the package, comment, and newline.
+        content.replace_range(range, "");
+        writer::write_content_to_file(file_path, &content)?;
+    }
+
+    Ok(())
 }
 
-/// Dynamically injects a new group import into the master flake.nix modules array
 pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
     if !flake_path.exists() {
-        return Ok(()); // Handled by initialization, but safe fallback
+        return Ok(()); 
     }
 
     let content = fs::read_to_string(&flake_path)?;
     let import_statement = format!("import ./groups/upstream/{}.nix", group);
 
-    // If the group is already linked, do nothing
     if content.contains(&import_statement) {
         return Ok(());
     }
 
-    // Prepare the inline Nix module block
     let module_inject = format!("          {{ home.packages = {} {{ inherit pkgs; }}; }}", import_statement);
 
     let mut new_content = String::new();
@@ -71,7 +130,6 @@ pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixErro
         new_content.push_str(line);
         new_content.push('\n');
 
-        // Look for the exact opening of the modules array
         if !injected && line.contains("modules = [") {
             new_content.push_str(&module_inject);
             new_content.push('\n');
@@ -85,6 +143,5 @@ pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixErro
         ));
     }
 
-    // The safety net: rnix will parse this reconstructed Flake before saving it!
     writer::write_content_to_file(&flake_path, &new_content)
 }
