@@ -1,6 +1,7 @@
 use rix_core::RixContext;
 use crate::handlers;
 use crate::ui;
+use crate::commands::package::format_package_name;
 
 pub fn handle_init(ctx: &RixContext) {
     handlers::execute_init(ctx);
@@ -26,10 +27,19 @@ pub fn handle_upgrade(ctx: &RixContext) {
 
 pub fn handle_list(ctx: &RixContext) {
     match ctx.list_all_packages() {
-        Ok(packages) => ui::print_package_table(packages),
-        Err(e) => { 
-            eprintln!("Failed to retrieve packages: {:?}", e); 
-            std::process::exit(1); 
+        Ok(packages) => {
+            // Map over the packages tuple vector and clean up the names via regex 
+            // before handing them off to the UI table renderer
+            let polished_packages = packages
+                .into_iter()
+                .map(|(name, group, desc)| (format_package_name(&name), group, desc))
+                .collect();
+
+            ui::print_package_table(polished_packages);
+        }
+        Err(e) => {  
+            eprintln!("Failed to retrieve packages: {:?}", e);  
+            std::process::exit(1);  
         }
     }
 }

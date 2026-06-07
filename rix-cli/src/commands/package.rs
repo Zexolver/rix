@@ -1,8 +1,30 @@
 use rix_core::{Package, RixContext};
 use rix_core::parser;
 use rix_core::ops::flake;
+use regex::Regex;
 use crate::handlers;
 use crate::ui;
+
+/// Formats raw Nix AST strings into human-readable package names for the UI table.
+/// Import and call this from `handlers.rs` (or wherever your `list` logic lives).
+pub fn format_package_name(raw_name: &str) -> String {
+    let ext_re = Regex::new(r"__ext_flake or \(([^.]+)\.packages").unwrap();
+    if let Some(caps) = ext_re.captures(raw_name) {
+        return caps.get(1).unwrap().as_str().to_string();
+    }
+
+    if raw_name.starts_with("pkgs.") {
+        return raw_name.replacen("pkgs.", "", 1);
+    }
+
+    if raw_name.contains("if ") || raw_name.len() > 40 {
+        let mut truncated = raw_name.chars().take(35).collect::<String>();
+        truncated.push_str("...");
+        return truncated;
+    }
+
+    raw_name.to_string()
+}
 
 pub fn handle_install(ctx: &RixContext, name: String, group: String, description: Option<String>) {
     // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
@@ -10,16 +32,16 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
         println!("🌐 Detected external flake URI. Normalizing...");
         
         let uri = parser::normalize_flake_uri(&name);
-        let alias = parser::infer_flake_alias(&uri); 
+        let alias = parser::infer_flake_alias(&uri);  
         
         println!("💉 Injecting flake input '{}' into flake.nix...", alias);
-        if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri) {
+        if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
             eprintln!("Failed to inject flake input: {:?}", e);
             std::process::exit(1);
         }
         
-        // Using a complex Nix expression here. The writer's smart-prefixing leaves it intact.
-        let pkg_expr = format!("inputs.{}.packages.${{system}}.default", alias);
+        // Wrap in parentheses to bypass the writer's auto-prefixing, and safely quote the architecture interpolation
+        let pkg_expr = format!("__ext_flake or ({}.packages.${{pkgs.system}}.default)", alias);
         let desc = description.unwrap_or_else(|| format!("External flake: {}", uri));
         
         println!("📦 Adding package output to environment...");
@@ -48,13 +70,13 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
             // Drop the spinner completely before modifying state files or prompting for sudo
             spinner.finish_and_clear();
             
-            handlers::execute_add(ctx, Package {  
-                name: verified_name,  
-                description,  
-                group,  
-                is_local_recipe: false  
+            handlers::execute_add(ctx, Package {   
+                name: verified_name,   
+                description,   
+                group,   
+                is_local_recipe: false   
             });
-                                            
+                                                                
             println!("Applying environmental upgrade generations...");
             if let Err(e) = ctx.apply_upgrade() {
                 eprintln!("Failed to apply target updates to environment: {:?}", e);
@@ -62,7 +84,7 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
         }
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("{:?}", e);  
+            eprintln!("{:?}", e);   
             std::process::exit(1);
         }
     }
