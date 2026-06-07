@@ -63,3 +63,38 @@ pub fn parse_root_node(content: &str) -> Result<SyntaxNode, String> {
     }
     Ok(parse.tree().syntax().clone())
 }
+
+/// Normalizes raw HTTPS URLs into standard Nix Flake URIs
+pub fn normalize_flake_uri(input: &str) -> String {
+    let input = input.trim();
+    
+    if let Some(stripped) = input.strip_prefix("https://github.com/") {
+        let parts: Vec<&str> = stripped.trim_end_matches('/').split('/').collect();
+        if parts.len() >= 2 {
+            return format!("github:{}/{}", parts[0], parts[1]);
+        }
+    } else if let Some(stripped) = input.strip_prefix("https://gitlab.com/") {
+        let parts: Vec<&str> = stripped.trim_end_matches('/').split('/').collect();
+        if parts.len() >= 2 {
+            return format!("gitlab:{}/{}", parts[0], parts[1]);
+        }
+    }
+    
+    // If it's already a valid flake URI (github:...) or local path, return as is
+    input.to_string()
+}
+
+/// Infers a safe default flake input name from a URI
+pub fn infer_flake_alias(uri: &str) -> String {
+    // Split by '/' (for paths or repos) or ':' (for flake schemas)
+    let last_segment = uri.split(&['/', ':'][..]).last().unwrap_or(uri);
+    
+    // Strip common suffixes that make for ugly variable names
+    let cleaned = last_segment.trim_end_matches(".git");
+    
+    if cleaned.is_empty() {
+        "custom-flake".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}

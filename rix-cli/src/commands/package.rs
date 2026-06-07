@@ -1,8 +1,44 @@
 use rix_core::{Package, RixContext};
+use rix_core::parser;
+use rix_core::ops::flake;
 use crate::handlers;
 use crate::ui;
 
 pub fn handle_install(ctx: &RixContext, name: String, group: String, description: Option<String>) {
+    // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
+    if name.starts_with("http://") || name.starts_with("https://") || name.contains(':') {
+        println!("🌐 Detected external flake URI. Normalizing...");
+        
+        let uri = parser::normalize_flake_uri(&name);
+        let alias = parser::infer_flake_alias(&uri); 
+        
+        println!("💉 Injecting flake input '{}' into flake.nix...", alias);
+        if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri) {
+            eprintln!("Failed to inject flake input: {:?}", e);
+            std::process::exit(1);
+        }
+        
+        // Using a complex Nix expression here. The writer's smart-prefixing leaves it intact.
+        let pkg_expr = format!("inputs.{}.packages.${{system}}.default", alias);
+        let desc = description.unwrap_or_else(|| format!("External flake: {}", uri));
+        
+        println!("📦 Adding package output to environment...");
+        handlers::execute_add(ctx, Package {
+            name: pkg_expr,
+            group,
+            description: Some(desc),
+            is_local_recipe: false,
+        });
+        
+        println!("Applying environmental upgrade generations...");
+        if let Err(e) = ctx.apply_upgrade() {
+            eprintln!("Failed to apply target updates to environment: {:?}", e);
+        } else {
+            println!("✅ Successfully installed remote flake '{}'", alias);
+        }
+        return;
+    }
+
     // Coerce the runtime String into a &'static str so the spinner can safely hold it
     let message = Box::leak(format!("Querying upstream package indices for '{}'...", name).into_boxed_str());
     let spinner = ui::create_spinner(message);
@@ -18,7 +54,7 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
                 group,  
                 is_local_recipe: false  
             });
-                                
+                                            
             println!("Applying environmental upgrade generations...");
             if let Err(e) = ctx.apply_upgrade() {
                 eprintln!("Failed to apply target updates to environment: {:?}", e);
