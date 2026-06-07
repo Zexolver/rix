@@ -6,24 +6,42 @@ use crate::handlers;
 use crate::ui;
 
 /// Formats raw Nix AST strings into human-readable package names for the UI table.
-/// Import and call this from `handlers.rs` (or wherever your `list` logic lives).
 pub fn format_package_name(raw_name: &str) -> String {
+    // Strip surrounding parentheses if they exist to make matching cleaner
+    let clean_raw = raw_name.trim_matches(|c| c == '(' || c == ')');
+
+    // 1. External flakes: __ext_flake or (alias.packages.${pkgs.system}.default)
     let ext_re = Regex::new(r"__ext_flake or \(([^.]+)\.packages").unwrap();
     if let Some(caps) = ext_re.captures(raw_name) {
         return caps.get(1).unwrap().as_str().to_string();
     }
 
-    if raw_name.starts_with("pkgs.") {
-        return raw_name.replacen("pkgs.", "", 1);
+    // 2. Conditional expressions: if pkgs.stdenv.isLinux then pkgs.foo else pkgs.bar (or null)
+    let cond_re = Regex::new(r"if\s+pkgs\.stdenv\.isLinux\s+then\s+pkgs\.([^\s]+)\s+else\s+(pkgs\.([^\s]+)|null)").unwrap();
+    if let Some(caps) = cond_re.captures(clean_raw) {
+        let linux_pkg = caps.get(1).unwrap().as_str();
+        let else_match = caps.get(2).unwrap().as_str();
+        
+        if else_match == "null" {
+            return format!("{} (Linux only)", linux_pkg);
+        } else if let Some(other_pkg) = caps.get(3) {
+            return format!("{} (Linux) / {} (macOS)", linux_pkg, other_pkg.as_str());
+        }
     }
 
-    if raw_name.contains("if ") || raw_name.len() > 40 {
-        let mut truncated = raw_name.chars().take(35).collect::<String>();
+    // 3. Standard pkgs. removal
+    if clean_raw.starts_with("pkgs.") {
+        return clean_raw.replacen("pkgs.", "", 1);
+    }
+
+    // 4. Fallback truncation
+    if clean_raw.len() > 40 {
+        let mut truncated = clean_raw.chars().take(35).collect::<String>();
         truncated.push_str("...");
         return truncated;
     }
 
-    raw_name.to_string()
+    clean_raw.to_string()
 }
 
 pub fn handle_install(ctx: &RixContext, name: String, group: String, description: Option<String>) {

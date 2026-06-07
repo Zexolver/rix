@@ -8,7 +8,7 @@ pub struct FoundPackage {
     pub file_path: PathBuf,
 }
 
-/// Dynamic lookups. Returns a list of packages matching full string or prefix.
+/// Dynamic lookups. Returns a list of packages matching full string, prefix, or inner contents.
 pub fn find_packages_in_upstream(upstream_dir: &Path, query: &str) -> Result<Vec<FoundPackage>, RixError> {
     let mut matches = Vec::new();
     let query_lower = query.to_lowercase();
@@ -22,7 +22,10 @@ pub fn find_packages_in_upstream(upstream_dir: &Path, query: &str) -> Result<Vec
                     if let Some(list) = parser::find_list_node(&root) {
                         for (full_pkg_name, _) in parser::extract_packages_from_list(&list) {
                             let clean_name = full_pkg_name.strip_prefix("pkgs.").unwrap_or(&full_pkg_name);
-                            if clean_name.to_lowercase().starts_with(&query_lower) {
+                            
+                            // FIX: Use .contains() instead of .starts_with() to penetrate 
+                            // complex AST strings like __ext_flake or if/then/else conditionals.
+                            if clean_name.to_lowercase().contains(&query_lower) {
                                 matches.push(FoundPackage {
                                     name: clean_name.to_string(),
                                     file_path: path.clone(),
