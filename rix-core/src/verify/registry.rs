@@ -6,23 +6,25 @@ pub fn verify_online_package_architecture(package_name: &str) -> Result<String, 
     
     if matches.is_empty() {
         return Err(RixError::ParseError(format!(
-            "Package '{}' is not available in the nixpkgs flake for your architecture.", 
+            "Package '{}' is not available in the nixpkgs flake for your architecture.",  
             package_name
         )));
     }
 
-    // Destructure the tuple to pull only the attribute path string out
+    // Since `run_nix_search` now sorts the best match to index 0, we can confidently grab it!
     for (attr_path, _) in &matches {
         let parts: Vec<&str> = attr_path.splitn(3, '.').collect();
         if parts.len() == 3 {
             let extracted_name = parts[2];
-            if extracted_name == package_name || extracted_name.ends_with(&format!(".{}", package_name)) {
+            let final_segment = extracted_name.split('.').last().unwrap_or(extracted_name);
+            
+            if final_segment == package_name || extracted_name.ends_with(&format!(".{}", package_name)) {
                 return Ok(extracted_name.to_string());
             }
         }
     }
 
-    // Access field `.0` of the first tuple match as a fallback
+    // Fallback to field .0 of the first (highest-ranked) tuple match
     let parts: Vec<&str> = matches[0].0.splitn(3, '.').collect();
     if parts.len() == 3 {
         Ok(parts[2].to_string())
@@ -35,8 +37,8 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
     let output = Command::new("nix")
         .args([
             "--extra-experimental-features", "nix-command flakes",
-            "search", 
-            "nixpkgs", 
+            "search",  
+            "nixpkgs",  
             query,
             "--json"
         ])
@@ -46,7 +48,7 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(RixError::ParseError(format!(
-            "Nix search evaluation failed. (If this is a cold run, cache initialization is required): {}", 
+            "Nix search evaluation failed. (If this is a cold run, cache initialization is required): {}",  
             stderr.trim()
         )));
     }
@@ -62,5 +64,25 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
             results.push((key.clone(), description));
         }
     }
+
+    // THE FIX: Sort results to prioritize exact matches and shorter attribute paths
+    let query_lower = query.to_lowercase();
+    results.sort_by(|a, b| {
+        let a_short = a.0.split('.').last().unwrap_or(&a.0).to_lowercase();
+        let b_short = b.0.split('.').last().unwrap_or(&b.0).to_lowercase();
+
+        let a_exact = a_short == query_lower;
+        let b_exact = b_short == query_lower;
+
+        if a_exact && !b_exact {
+            std::cmp::Ordering::Less
+        } else if b_exact && !a_exact {
+            std::cmp::Ordering::Greater
+        } else {
+            // If both are exact or neither are exact, the shorter path wins (banishing deep nesting)
+            a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0))
+        }
+    });
+
     Ok(results)
 }

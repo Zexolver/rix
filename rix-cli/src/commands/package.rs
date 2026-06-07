@@ -12,11 +12,11 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
             // Drop the spinner completely before modifying state files or prompting for sudo
             spinner.finish_and_clear();
             
-            handlers::execute_add(ctx, Package { 
-                name: verified_name, 
-                description, 
-                group, 
-                is_local_recipe: false 
+            handlers::execute_add(ctx, Package {  
+                name: verified_name,  
+                description,  
+                group,  
+                is_local_recipe: false  
             });
                                 
             println!("Applying environmental upgrade generations...");
@@ -26,7 +26,7 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
         }
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("{:?}", e); 
+            eprintln!("{:?}", e);  
             std::process::exit(1);
         }
     }
@@ -43,9 +43,24 @@ pub fn handle_search(_ctx: &RixContext, query: String) {
             } else {
                 println!("\n{:<40} {}", "PACKAGE ATTRIBUTE PATH", "DESCRIPTION");
                 println!("{}", "-".repeat(80));
-                for (path, desc) in results {
-                    let short_path = path.splitn(3, '.').nth(2).unwrap_or(&path);
-                    println!("{:<40} {}", short_path, desc);
+                
+                // UI FIX: Only display the top 15 results
+                let display_limit = 15;
+                for (path, desc) in results.iter().take(display_limit) {
+                    let short_path = path.splitn(3, '.').nth(2).unwrap_or(path);
+                    
+                    // Truncate description so it doesn't wrap wildly in standard terminals
+                    let clean_desc = if desc.len() > 60 {
+                        format!("{}...", &desc[..57])
+                    } else {
+                        desc.to_string()
+                    };
+                    
+                    println!("{:<40} {}", short_path, clean_desc);
+                }
+                
+                if results.len() > display_limit {
+                    println!("\n... and {} more results hidden. (Showing top {})", results.len() - display_limit, display_limit);
                 }
                 println!();
             }
