@@ -19,7 +19,7 @@ pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError
     // Check if package exists using the parser
     let packages = parser::extract_packages_from_list(&list_node);
     if packages.iter().any(|(name, _)| name == &package.name) {
-        return Ok(());  
+        return Ok(());   
     }
 
     let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
@@ -28,7 +28,7 @@ pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError
     // TEXT RANGE SURGERY: Find the exact byte coordinate of the closing bracket ']'
     let last_token = list_node.last_token()
         .ok_or_else(|| RixError::ParseError("Could not find closing bracket of list".into()))?;
-        
+         
     let insert_index: usize = last_token.text_range().start().into();
 
     // Inject the string exactly before the closing bracket
@@ -106,42 +106,4 @@ pub fn remove_package_from_file(name: &str, file_path: &Path) -> Result<(), RixE
     }
 
     Ok(())
-}
-
-pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixError> {
-    let flake_path = config_dir.join("flake.nix");
-    if !flake_path.exists() {
-        return Ok(()); 
-    }
-
-    let content = fs::read_to_string(&flake_path)?;
-    let import_statement = format!("import ./groups/upstream/{}.nix", group);
-
-    if content.contains(&import_statement) {
-        return Ok(());
-    }
-
-    let module_inject = format!("          {{ home.packages = {} {{ inherit pkgs; }}; }}", import_statement);
-
-    let mut new_content = String::new();
-    let mut injected = false;
-
-    for line in content.lines() {
-        new_content.push_str(line);
-        new_content.push('\n');
-
-        if !injected && line.contains("modules = [") {
-            new_content.push_str(&module_inject);
-            new_content.push('\n');
-            injected = true;
-        }
-    }
-
-    if !injected {
-        return Err(RixError::ParseError(
-            "Could not find 'modules = [' array in flake.nix to auto-link group".into()
-        ));
-    }
-
-    writer::write_content_to_file(&flake_path, &new_content)
 }
