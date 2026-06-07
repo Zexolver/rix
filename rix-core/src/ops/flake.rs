@@ -41,7 +41,7 @@ pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixErro
     writer::write_content_to_file(&flake_path, &new_content)
 }
 
-pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str) -> Result<(), RixError> {
+pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str, group: &str) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
     if !flake_path.exists() {
         return Err(RixError::IOError(std::io::Error::new(
@@ -55,7 +55,6 @@ pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str) -> Result<(
     // 1. Inject the Input Attribute
     let input_str = format!("    {}.url = \"{}\";\n  ", alias, uri);
     if !content.contains(&format!("{}.url", alias)) {
-        // Find the end of the inputs block safely by looking for our template's transition
         if let Some(inputs_end_idx) = content.find("  };\n\n  outputs = {") {
             content.insert_str(inputs_end_idx, &input_str);
         } else {
@@ -65,9 +64,7 @@ pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str) -> Result<(
 
     // 2. Inject the Output Parameter
     let output_param = format!("{}, ", alias);
-    // Ensure we don't double-inject the parameter
     if !content.contains(&output_param) {
-        // Find the '... }:' in the outputs lambda arguments
         if let Some(outputs_idx) = content.find("... }:") {
             content.insert_str(outputs_idx, &output_param);
         } else {
@@ -75,5 +72,27 @@ pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str) -> Result<(
         }
     }
 
-    writer::write_content_to_file(&flake_path, &content)
+    // 3. Pass the new alias down to the group imports in flake.nix
+    // e.g., changes { inherit pkgs; } into { inherit pkgs neovim; }
+    let target_inherit = "{ inherit pkgs";
+    if !content.contains(&format!("{} {}", target_inherit, alias)) {
+        content = content.replace(target_inherit, &format!("{} {}", target_inherit, alias));
+    }
+
+    writer::write_content_to_file(&flake_path, &content)?;
+
+    // 4. Update the group's .nix file header to accept the new variable
+    // e.g., changes { pkgs, ... }: into { pkgs, neovim, ... }:
+    let group_path = config_dir.join(format!("groups/upstream/{}.nix", group));
+    if group_path.exists() {
+        let mut group_content = fs::read_to_string(&group_path)?;
+        let target_header = "{ pkgs";
+        // Prevent duplicate injections
+        if group_content.contains(target_header) && !group_content.contains(&format!("{},", alias)) && !group_content.contains(&format!("{} ", alias)) {
+            group_content = group_content.replace(target_header, &format!("{{ pkgs, {}", alias));
+            writer::write_content_to_file(&group_path, &group_content)?;
+        }
+    }
+
+    Ok(())
 }

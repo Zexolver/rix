@@ -8,3 +8,5 @@ rix-core = { path = "../rix-core" }
 clap = { version = "4.4", features = ["derive"] }
 
 indicatif = "0.17"
+
+regex = "1.10"
