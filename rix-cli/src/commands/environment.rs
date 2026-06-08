@@ -63,7 +63,7 @@ pub fn handle_clean(deep: bool) {
     let mut cmd = Command::new("nix-collect-garbage");
     
     if deep {
-        cmd.arg("-d");  
+        cmd.arg("-d");   
     }
 
     match cmd.output() {
@@ -92,6 +92,48 @@ pub fn handle_clean(deep: bool) {
         Err(e) => {
             spinner.finish_and_clear();
             eprintln!("Failed to invoke Nix garbage collector: {:?}", e);
+        }
+    }
+}
+
+pub fn handle_history(_ctx: &RixContext) {
+    let spinner = ui::create_spinner("Reading profile generation history...");
+
+    let mut cmd = Command::new("nix");
+    cmd.args(["profile", "history"]);
+
+    match cmd.output() {
+        Ok(output) => {
+            spinner.finish_and_clear();
+
+            if output.status.success() {
+                let stdout_str = String::from_utf8_lossy(&output.stdout);
+                
+                println!("⏳ Environment Generation History\n");
+                
+                for line in stdout_str.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+
+                    // Parse out generation or version headers cleanly
+                    if trimmed.starts_with("Generation") || trimmed.starts_with("Version") {
+                        let gen_line = trimmed.replace(":", "");
+                        println!("• \x1b[1;36m{}\x1b[0m", gen_line);
+                    } else {
+                        // Apply indentation and a subtle grey style to diff modification text
+                        println!("  \x1b[2m↳ {}\x1b[0m", trimmed);
+                    }
+                }
+            } else {
+                let stderr_str = String::from_utf8_lossy(&output.stderr);
+                eprintln!("❌ Failed to read history state:\n{}", stderr_str);
+            }
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("Failed to execute Nix history sequence: {:?}", e);
         }
     }
 }

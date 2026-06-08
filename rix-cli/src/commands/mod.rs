@@ -13,6 +13,7 @@ pub fn handle(cli: Cli, ctx: RixContext) {
         Commands::Upgrade => environment::handle_upgrade(&ctx),
         Commands::List => environment::handle_list(&ctx),
         Commands::Clean { deep } => environment::handle_clean(deep),
+        Commands::History => environment::handle_history(&ctx),
         
         // Package lifecycle commands
         Commands::Install { name, group, description } => package::handle_install(&ctx, name, group, description),

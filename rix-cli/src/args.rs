@@ -58,6 +58,10 @@ pub enum Commands {
         deep: bool,
     },
 
+    /// [Maintenance] View the chronological history of environment profile generations
+    #[command(alias = "gen")]
+    History,
+
     /// [Intermediate] Native Nix-style profile manipulation interface
     #[command(subcommand)]
     Profile(ProfileCommands),
