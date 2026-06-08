@@ -51,6 +51,13 @@ pub enum Commands {
     /// List all currently managed packages across environment profile groups
     List,
 
+    /// [Maintenance] Sweeps the Nix store to reclaim disk space
+    Clean {
+        /// Aggressively removes old system/profile generations before cleaning
+        #[arg(short, long)]
+        deep: bool,
+    },
+
     /// [Intermediate] Native Nix-style profile manipulation interface
     #[command(subcommand)]
     Profile(ProfileCommands),
