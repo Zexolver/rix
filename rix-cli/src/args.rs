@@ -62,6 +62,12 @@ pub enum Commands {
     #[command(alias = "gen")]
     History,
 
+    /// [Maintenance] Revert the active profile environment to a previous generation state
+    Rollback {
+        /// Optional specific generation target number (defaults to previous)
+        version: Option<String>,
+    },
+
     /// [Intermediate] Native Nix-style profile manipulation interface
     #[command(subcommand)]
     Profile(ProfileCommands),

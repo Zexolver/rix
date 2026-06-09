@@ -14,6 +14,7 @@ pub fn handle(cli: Cli, ctx: RixContext) {
         Commands::List => environment::handle_list(&ctx),
         Commands::Clean { deep } => environment::handle_clean(deep),
         Commands::History => environment::handle_history(&ctx),
+        Commands::Rollback { version } => environment::handle_rollback(&ctx, version),
         
         // Package lifecycle commands
         Commands::Install { name, group, description } => package::handle_install(&ctx, name, group, description),

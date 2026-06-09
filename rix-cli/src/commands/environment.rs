@@ -137,3 +137,48 @@ pub fn handle_history(_ctx: &RixContext) {
         }
     }
 }
+
+pub fn handle_rollback(_ctx: &RixContext, version: Option<String>) {
+    let msg = match &version {
+        Some(v) => format!("Rolling back environment state to version {}...", v),
+        None => "Rolling back environment state to previous version...".to_string(),
+    };
+    
+    let static_msg: &'static str = Box::leak(msg.into_boxed_str());
+    let spinner = ui::create_spinner(static_msg);
+    let start_time = Instant::now();
+
+    let mut cmd = Command::new("nix");
+    cmd.arg("profile").arg("rollback");
+
+    if let Some(v) = version {
+        cmd.arg("--to").arg(v);
+    }
+
+    match cmd.output() {
+        Ok(output) => {
+            let duration = start_time.elapsed();
+            spinner.finish_and_clear();
+
+            if output.status.success() {
+                let stderr_str = String::from_utf8_lossy(&output.stderr);
+                
+                // Nix usually outputs tracking logs to stderr for rollbacks
+                let summary = stderr_str
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .last()
+                    .unwrap_or("Environment generation rollback successful.");
+
+                println!("⏪ {} [finished in {:.2}s]", summary.trim(), duration.as_secs_f64());
+            } else {
+                let stderr_str = String::from_utf8_lossy(&output.stderr);
+                eprintln!("❌ Rollback failed after {:.2}s:\n{}", duration.as_secs_f64(), stderr_str.trim());
+            }
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("Failed to execute Nix rollback sequence: {:?}", e);
+        }
+    }
+}
