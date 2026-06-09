@@ -46,7 +46,11 @@ pub enum Commands {
     Update,
 
     /// [Beginner] Upgrade environment generations to match declaration arrays
-    Upgrade,
+    Upgrade {
+        /// Preview changes without actually compiling or modifying the system
+        #[arg(short = 'n', long = "dry-run")]
+        dry_run: bool,
+    },
 
     /// List all currently managed packages across environment profile groups
     List,

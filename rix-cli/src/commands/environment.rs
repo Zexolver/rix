@@ -18,13 +18,23 @@ pub fn handle_update(ctx: &RixContext) {
     println!("Upstream indexes updated successfully!");
 }
 
-pub fn handle_upgrade(ctx: &RixContext) {
-    println!("Applying generational upgrade across declarative sets...");
-    if let Err(e) = ctx.apply_upgrade() {
+pub fn handle_upgrade(ctx: &RixContext, dry_run: bool) {
+    if dry_run {
+        println!("🔍 Executing dry-run upgrade preview...");
+    } else {
+        println!("Applying generational upgrade across declarative sets...");
+    }
+
+    if let Err(e) = ctx.apply_upgrade(dry_run) {
         eprintln!("Upgrade realization failed: {:?}", e);
         std::process::exit(1);
     }
-    println!("System configuration environment generation fully built!");
+    
+    if dry_run {
+        println!("Dry-run complete. No system changes were applied.");
+    } else {
+        println!("System configuration environment generation fully built!");
+    }
 }
 
 pub fn handle_list(ctx: &RixContext) {
@@ -39,9 +49,9 @@ pub fn handle_list(ctx: &RixContext) {
 
             ui::print_package_table(polished_packages);
         }
-        Err(e) => {  
-            eprintln!("Failed to retrieve packages: {:?}", e);  
-            std::process::exit(1);  
+        Err(e) => {   
+            eprintln!("Failed to retrieve packages: {:?}", e);   
+            std::process::exit(1);   
         }
     }
 }
@@ -63,7 +73,7 @@ pub fn handle_clean(deep: bool) {
     let mut cmd = Command::new("nix-collect-garbage");
     
     if deep {
-        cmd.arg("-d");   
+        cmd.arg("-d");    
     }
 
     match cmd.output() {

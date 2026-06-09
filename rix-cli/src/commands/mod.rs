@@ -10,7 +10,7 @@ pub fn handle(cli: Cli, ctx: RixContext) {
         // Environment lifecycle commands
         Commands::Init => environment::handle_init(&ctx),
         Commands::Update => environment::handle_update(&ctx),
-        Commands::Upgrade => environment::handle_upgrade(&ctx),
+        Commands::Upgrade { dry_run } => environment::handle_upgrade(&ctx, dry_run),
         Commands::List => environment::handle_list(&ctx),
         Commands::Clean { deep } => environment::handle_clean(deep),
         Commands::History => environment::handle_history(&ctx),

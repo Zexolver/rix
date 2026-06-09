@@ -89,8 +89,8 @@ impl RixContext {
         system::update_indexes()
     }
 
-    pub fn apply_upgrade(&self) -> Result<(), RixError> {
+    pub fn apply_upgrade(&self, dry_run: bool) -> Result<(), RixError> {
         self.verify_system()?;
-        system::apply_upgrade(&self.config_dir)
+        system::apply_upgrade(&self.config_dir, dry_run)
     }
 }

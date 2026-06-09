@@ -71,7 +71,7 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
         });
         
         println!("Applying environmental upgrade generations...");
-        if let Err(e) = ctx.apply_upgrade() {
+        if let Err(e) = ctx.apply_upgrade(false) {
             eprintln!("Failed to apply target updates to environment: {:?}", e);
         } else {
             println!("✅ Successfully installed remote flake '{}'", alias);
@@ -96,7 +96,7 @@ pub fn handle_install(ctx: &RixContext, name: String, group: String, description
             });
                                                                 
             println!("Applying environmental upgrade generations...");
-            if let Err(e) = ctx.apply_upgrade() {
+            if let Err(e) = ctx.apply_upgrade(false) {
                 eprintln!("Failed to apply target updates to environment: {:?}", e);
             }
         }
