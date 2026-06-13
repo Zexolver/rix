@@ -2,11 +2,20 @@ use std::env;
 use std::path::PathBuf;
 
 pub fn get_config_dir() -> PathBuf {
-    // Check for an explicit environment override variable first, otherwise default to user-space XDG configuration path
+    // 1. Check for an explicit environment override variable first
     if let Ok(custom_path) = env::var("RIX_CONFIG_DIR") {
-        PathBuf::from(custom_path)
+        return PathBuf::from(custom_path);
+    }
+
+    // 2. Determine if executing with system-level privileges
+    let is_root = env::var("USER").unwrap_or_default() == "root" 
+        || env::var("SUDO_USER").is_ok();
+
+    // 3. Route to the appropriate standard directory layout
+    if is_root {
+        PathBuf::from("/etc/rix")
     } else {
-        let home_dir = env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
-        home_dir.join(".config/rix")
+        let home_dir = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home_dir).join(".config/rix")
     }
 }
