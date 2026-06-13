@@ -14,11 +14,18 @@ pub struct Package {
 
 pub struct RixContext {
     pub config_dir: PathBuf,
+    pub is_system: bool,
 }
 
 impl RixContext {
     pub fn new(config_dir: PathBuf) -> Self {
-        Self { config_dir }
+        // Automatically classify as system scope if targeting /etc/rix 
+        // or if the process was explicitly escalated via root/sudo privileges
+        let is_system = config_dir.starts_with("/etc/rix") 
+            || std::env::var("USER").unwrap_or_default() == "root"
+            || std::env::var("SUDO_USER").is_ok();
+
+        Self { config_dir, is_system }
     }
 
     pub fn verify_system(&self) -> Result<(), RixError> {
@@ -56,7 +63,7 @@ impl RixContext {
         // 1. Add the package to the group module
         ops::add_package(&self.config_dir.join("groups/upstream"), package)?;
         
-        // 2. NEW: Ensure this group is dynamically imported into the master flake.nix
+        // 2. Ensure this group is dynamically imported into the master flake.nix
         ops::link_group_to_flake(&self.config_dir, &group_name)?;
         
         // 3. Verify final syntax
