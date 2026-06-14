@@ -24,10 +24,13 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
 
     let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
     
-    // Inject the nixGL wrapper if a hardware lockfile specifies one
+    // Inject the nixGL wrapper if a hardware lockfile specifies one.
+    // Upgraded to symlinkJoin to preserve /share/ directory (desktop icons and themes).
     let formatted_pkg = if let Some(ref w) = wrapper {
-        format!("  (pkgs.writeShellScriptBin \"{}\" ''exec ${{pkgs.nixgl.{}}}/bin/{} ${{pkgs.{}}}/bin/{}'') # {}\n",
-                package.name, w, w, package.name, package.name, description)
+        format!(
+            "  (pkgs.symlinkJoin {{ name = \"{0}-rix-wrap\"; paths = [ pkgs.{0} ]; postBuild = ''\n    rm $out/bin/{0}\n    cat <<'_EOF' > $out/bin/{0}\n#!/bin/sh\nexec ${{pkgs.nixgl.{1}}}/bin/{1} ${{pkgs.{0}}}/bin/{0} \"$@\"\n_EOF\n    chmod +x $out/bin/{0}\n  ''; }}) # {2}\n",
+            package.name, w, description
+        )
     } else {
         format!("  pkgs.{} # {}\n", package.name, description)
     };
@@ -56,11 +59,20 @@ pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<S
     for child in list_node.children() {
         let text = child.text().to_string().trim().to_string();
         
-        // Smart matching: check if it's a standard package or a nixGL wrapped shell script
+        // Smart matching: Support normal packages, old script wrappers, and new symlinkJoin wrappers
         let pkg_name = if text.starts_with("(pkgs.writeShellScriptBin") {
             let parts: Vec<&str> = text.split('"').collect();
             if parts.len() >= 3 {
-                parts[1].to_string() // Extracts the package name from the quotes
+                parts[1].to_string()
+            } else {
+                text.clone()
+            }
+        } else if text.starts_with("(pkgs.symlinkJoin") {
+            // Extract the original package name from the "paths = [ pkgs.NAME ];" declaration
+            if let Some(start) = text.find("paths = [ pkgs.") {
+                let rest = &text[start + 15..];
+                let end = rest.find(" ]").unwrap_or(rest.len());
+                rest[..end].to_string()
             } else {
                 text.clone()
             }
@@ -82,14 +94,14 @@ pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<S
                         } else if token.kind() == SyntaxKind::TOKEN_WHITESPACE {
                             end_idx = token.text_range().end().into();
                             if token.text().contains('\n') {
-                                break; // Stop after capturing the line's trailing newline
+                                break;
                             }
                         } else {
                             break;
                         }
                         current_sibling = token.next_sibling_or_token();
                     }
-                    rowan::NodeOrToken::Node(_) => break, // Stop if we hit another package
+                    rowan::NodeOrToken::Node(_) => break,
                 }
             }
 
@@ -101,8 +113,6 @@ pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<S
                         if token.kind() == SyntaxKind::TOKEN_WHITESPACE {
                             let text = token.text();
                             if let Some(pos) = text.rfind('\n') {
-                                // DEFENSIVE FIX: The whitespace token contains a newline bundled with spaces.
-                                // We advance start_idx past the newline to consume ONLY the indentation spaces.
                                 start_idx = usize::from(token.text_range().start()) + pos + 1;
                                 break;
                             } else {
@@ -123,7 +133,6 @@ pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<S
     }
 
     if let Some(range) = target_range {
-        // TEXT RANGE SURGERY: Slice out the exact bytes of the package, comment, and newline.
         content.replace_range(range, "");
         writer::write_content_to_file(file_path, &content)?;
     }
