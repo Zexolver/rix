@@ -23,7 +23,7 @@ pub fn handle_refresh(ctx: &RixContext) {
     
     // DYNAMIC HARDWARE FIX: Call our new ops module to generate hardware-state.nix
     if let Err(e) = rix_core::ops::detect_and_lock_hardware(&ctx.config_dir) {
-        eprintln!("Error: Failed to generate hardware lockfile: {:?}", e);
+        eprintln!("Error: Failed to generate hardware lockfile: {}", e);
         std::process::exit(1);
     }
 
