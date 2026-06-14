@@ -45,6 +45,9 @@ pub enum Commands {
     /// [Beginner] Update local channel indices tracking records
     Update,
 
+    /// [System] Detect hardware and update the lockfile for NixGL graphics acceleration
+    Refresh,
+
     /// [Beginner] Upgrade environment generations to match declaration arrays
     Upgrade {
         /// Preview changes without actually compiling or modifying the system
