@@ -1,8 +1,49 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
+use std::fs;
 use rix_core::{Package, RixContext, FoundPackage};
 
 pub fn execute_init(ctx: &RixContext) {
-    println!("Initializing modern declarative Nix profile environment...");
+    println!("Initializing modern declarative Nix profile environment...\n");
+
+    // --- Interactive Default Scope Prompt ---
+    println!("Rix can operate in two primary scopes:");
+    println!("  [1] User   (Local home directory, no root required)");
+    println!("  [2] System (Global /etc/rix, requires sudo)");
+    print!("Select default operation scope for future commands (1-2) [1]: ");
+    io::stdout().flush().unwrap();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    let choice = input.trim();
+
+    let default_system = choice == "2";
+    let scope_str = if default_system { "system" } else { "user" };
+
+    // Resolve the real user's home directory even if running under sudo
+    let home_dir = std::env::var("SUDO_USER")
+        .map(|u| format!("/home/{}", u))
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| "/root".to_string());
+
+    let user_config_dir = PathBuf::from(home_dir).join(".config").join("rix");
+    
+    if !user_config_dir.exists() {
+        if let Err(e) = fs::create_dir_all(&user_config_dir) {
+            eprintln!("Warning: Failed to create config directory: {}", e);
+        }
+    }
+
+    let toml_path = user_config_dir.join("rix.toml");
+    let toml_content = format!("[core]\ndefault_scope = \"{}\"\n", scope_str);
+    
+    match fs::write(&toml_path, toml_content) {
+        Ok(_) => println!("✅ Default scope set to '{}' in {}", scope_str, toml_path.display()),
+        Err(e) => eprintln!("Warning: Failed to save default scope configuration: {}", e),
+    }
+    
+    println!();
+    // ----------------------------------------
     
     // Check if a layout already exists by verifying the root flake configuration path
     let flake_path = ctx.config_dir.join("flake.nix");
