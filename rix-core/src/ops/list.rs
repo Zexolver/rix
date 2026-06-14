@@ -24,12 +24,13 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
 
     let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
     
-    // Inject the nixGL wrapper if a hardware lockfile specifies one.
-    // Upgraded to symlinkJoin to preserve /share/ directory (desktop icons and themes).
-    let formatted_pkg = if let Some(ref w) = wrapper {
+    // Inject the nixGL wrapper if requested.
+    // DYNAMIC HARDWARE FIX: It now imports `../../hardware-state.nix` on the fly
+    // so this configuration file remains 100% portable across Git repos!
+    let formatted_pkg = if wrapper.is_some() {
         format!(
-            "  (pkgs.symlinkJoin {{ name = \"{0}-rix-wrap\"; paths = [ pkgs.{0} ]; postBuild = ''\n    rm $out/bin/{0}\n    cat <<'_EOF' > $out/bin/{0}\n#!/bin/sh\nexec ${{pkgs.nixgl.{1}}}/bin/{1} ${{pkgs.{0}}}/bin/{0} \"$@\"\n_EOF\n    chmod +x $out/bin/{0}\n  ''; }}) # {2}\n",
-            package.name, w, description
+            "  (pkgs.symlinkJoin {{ name = \"{0}-rix-wrap\"; paths = [ pkgs.{0} ]; postBuild = ''\n    rm $out/bin/{0}\n    cat <<'_EOF' > $out/bin/{0}\n#!/bin/sh\nexec ${{pkgs.nixgl.${{import ../../hardware-state.nix}}}}/bin/${{import ../../hardware-state.nix}} ${{pkgs.{0}}}/bin/{0} \"$@\"\n_EOF\n    chmod +x $out/bin/{0}\n  ''; }}) # {1}\n",
+            package.name, description
         )
     } else {
         format!("  pkgs.{} # {}\n", package.name, description)

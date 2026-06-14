@@ -21,14 +21,14 @@ pub fn handle_update(ctx: &RixContext) {
 pub fn handle_refresh(ctx: &RixContext) {
     println!("Scanning system PCI interfaces for graphics hardware...\n");
     
-    // Call the core logic to probe the GPU and generate the lockfile
-    if let Err(e) = rix_core::hardware::generate_hardware_lock(&ctx.config_dir) {
-        eprintln!("Error: Failed to generate hardware lockfile: {}", e);
+    // DYNAMIC HARDWARE FIX: Call our new ops module to generate hardware-state.nix
+    if let Err(e) = rix_core::ops::detect_and_lock_hardware(&ctx.config_dir) {
+        eprintln!("Error: Failed to generate hardware lockfile: {:?}", e);
         std::process::exit(1);
     }
 
     println!("\nHardware profile synchronized successfully.");
-    println!("Note: This hardware profile will automatically be injected the next time you modify your environment (e.g., via 'rix install').");
+    println!("Note: This hardware state will automatically be injected the next time you modify your environment (e.g., via 'rix install').");
 }
 
 pub fn handle_upgrade(ctx: &RixContext, dry_run: bool) {
