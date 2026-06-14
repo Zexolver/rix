@@ -15,8 +15,8 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
             // Filter out common Nix/CMake build noise from the terminal
-            if line.contains("%]")  
-                || line.contains("Built target")  
+            if line.contains("%]")   
+                || line.contains("Built target")   
                 || line.contains("Install the project...")
                 || line.contains("-- Install configuration:")
                 || line.contains("separating debug info")
@@ -50,11 +50,11 @@ pub fn update_indexes() -> Result<(), RixError> {
     run_quiet_command(cmd, "Failed to update Flake lock references")
 }
 
-pub fn apply_upgrade(config_path: &Path, dry_run: bool) -> Result<(), RixError> {
+pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Result<(), RixError> {
     let platform = detect_target_platform();
     let config_str = config_path.to_string_lossy().to_string();
 
-    let cmd = if platform == TargetPlatform::NixOS {
+    let cmd = if is_system && platform == TargetPlatform::NixOS {
         let mut c = Command::new("sudo");
         c.env("NIX_CONFIG", "experimental-features = nix-command flakes");
         

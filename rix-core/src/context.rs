@@ -19,11 +19,28 @@ pub struct RixContext {
 
 impl RixContext {
     pub fn new(config_dir: PathBuf) -> Self {
-        // Automatically classify as system scope if targeting /etc/rix 
+        // Automatically classify as system scope if targeting /etc/rix   
         // or if the process was explicitly escalated via root/sudo privileges
-        let is_system = config_dir.starts_with("/etc/rix") 
+        let is_system = config_dir.starts_with("/etc/rix")   
             || std::env::var("USER").unwrap_or_default() == "root"
             || std::env::var("SUDO_USER").is_ok();
+
+        // Security patch: `sudo` strips environment paths on standard Linux distributions.
+        // We inject the default Nix profile bin back into the Rust process environment PATH
+        // so all subsequent Command::new("nix") calls execute successfully when run under sudo.
+        if is_system {
+            if let Ok(current_path) = std::env::var("PATH") {
+                let nix_path = "/nix/var/nix/profiles/default/bin";
+                if !current_path.contains(nix_path) {
+                    // SAFETY: Modifying the environment is unsafe in multithreaded contexts.
+                    // This is safe here because Context initialization happens synchronously 
+                    // at application startup before any threads are spawned.
+                    unsafe {
+                        std::env::set_var("PATH", format!("{}:{}", current_path, nix_path));
+                    }
+                }
+            }
+        }
 
         Self { config_dir, is_system }
     }
@@ -98,6 +115,6 @@ impl RixContext {
 
     pub fn apply_upgrade(&self, dry_run: bool) -> Result<(), RixError> {
         self.verify_system()?;
-        system::apply_upgrade(&self.config_dir, dry_run)
+        system::apply_upgrade(&self.config_dir, self.is_system, dry_run)
     }
 }
