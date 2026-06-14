@@ -40,7 +40,7 @@ pub fn handle_upgrade(ctx: &RixContext, dry_run: bool) {
 pub fn handle_list(ctx: &RixContext) {
     match ctx.list_all_packages() {
         Ok(packages) => {
-            // Map over the packages tuple vector and clean up the names via regex  
+            // Map over the packages tuple vector and clean up the names via regex   
             // before handing them off to the UI table renderer
             let polished_packages = packages
                 .into_iter()
@@ -70,6 +70,8 @@ pub fn handle_clean(deep: bool) {
     // Start the stopwatch
     let start_time = Instant::now();
 
+    // nix-collect-garbage automatically scopes to the user running the command.
+    // If run via sudo, it cleans the global system store. If run normally, the user's local store.
     let mut cmd = Command::new("nix-collect-garbage");
     
     if deep {
@@ -106,11 +108,19 @@ pub fn handle_clean(deep: bool) {
     }
 }
 
-pub fn handle_history(_ctx: &RixContext) {
+pub fn handle_history(ctx: &RixContext) {
     let spinner = ui::create_spinner("Reading profile generation history...");
 
-    let mut cmd = Command::new("nix");
-    cmd.args(["profile", "history"]);
+    // Route to system default profile or home-manager generations based on execution scope
+    let mut cmd = if ctx.is_system {
+        let mut c = Command::new("sudo");
+        c.args(["nix-env", "--profile", "/nix/var/nix/profiles/default", "--list-generations"]);
+        c
+    } else {
+        let mut c = Command::new("home-manager");
+        c.arg("generations");
+        c
+    };
 
     match cmd.output() {
         Ok(output) => {
@@ -148,7 +158,7 @@ pub fn handle_history(_ctx: &RixContext) {
     }
 }
 
-pub fn handle_rollback(_ctx: &RixContext, version: Option<String>) {
+pub fn handle_rollback(ctx: &RixContext, version: Option<String>) {
     let msg = match &version {
         Some(v) => format!("Rolling back environment state to version {}...", v),
         None => "Rolling back environment state to previous version...".to_string(),
@@ -158,12 +168,29 @@ pub fn handle_rollback(_ctx: &RixContext, version: Option<String>) {
     let spinner = ui::create_spinner(static_msg);
     let start_time = Instant::now();
 
-    let mut cmd = Command::new("nix");
-    cmd.arg("profile").arg("rollback");
-
-    if let Some(v) = version {
-        cmd.arg("--to").arg(v);
-    }
+    // Route to system default profile or home-manager local state based on execution scope
+    let mut cmd = if ctx.is_system {
+        let mut c = Command::new("sudo");
+        c.args(["nix-env", "--profile", "/nix/var/nix/profiles/default"]);
+        if let Some(v) = version {
+            c.arg("--switch-generation").arg(v);
+        } else {
+            c.arg("--rollback");
+        }
+        c
+    } else {
+        let mut c = Command::new("nix-env");
+        if let Ok(home) = std::env::var("HOME") {
+            let hm_profile = format!("{}/.local/state/nix/profiles/home-manager", home);
+            c.args(["--profile", &hm_profile]);
+        }
+        if let Some(v) = version {
+            c.arg("--switch-generation").arg(v);
+        } else {
+            c.arg("--rollback");
+        }
+        c
+    };
 
     match cmd.output() {
         Ok(output) => {
@@ -172,9 +199,12 @@ pub fn handle_rollback(_ctx: &RixContext, version: Option<String>) {
 
             if output.status.success() {
                 let stderr_str = String::from_utf8_lossy(&output.stderr);
+                let stdout_str = String::from_utf8_lossy(&output.stdout);
                 
-                // Nix usually outputs tracking logs to stderr for rollbacks
-                let summary = stderr_str
+                // Fallback to stdout if stderr is empty (home-manager often prints to stdout)
+                let output_text = if !stderr_str.trim().is_empty() { stderr_str } else { stdout_str };
+                
+                let summary = output_text
                     .lines()
                     .filter(|l| !l.is_empty())
                     .last()
