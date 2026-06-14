@@ -4,7 +4,7 @@ use crate::errors::RixError;
 use crate::{parser, writer, Package};
 use rnix::SyntaxKind;
 
-pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError> {
+pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String>) -> Result<(), RixError> {
     let file_path = upstream_dir.join(format!("{}.nix", package.group));
     
     if !file_path.exists() {
@@ -23,12 +23,19 @@ pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError
     }
 
     let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
-    let formatted_pkg = format!("  pkgs.{} # {}\n", package.name, description);
+    
+    // Inject the nixGL wrapper if a hardware lockfile specifies one
+    let formatted_pkg = if let Some(ref w) = wrapper {
+        format!("  (pkgs.writeShellScriptBin \"{}\" ''exec ${{pkgs.nixgl.{}}}/bin/{} ${{pkgs.{}}}/bin/{}'') # {}\n",
+                package.name, w, w, package.name, package.name, description)
+    } else {
+        format!("  pkgs.{} # {}\n", package.name, description)
+    };
 
     // TEXT RANGE SURGERY: Find the exact byte coordinate of the closing bracket ']'
     let last_token = list_node.last_token()
         .ok_or_else(|| RixError::ParseError("Could not find closing bracket of list".into()))?;
-         
+          
     let insert_index: usize = last_token.text_range().start().into();
 
     // Inject the string exactly before the closing bracket
@@ -38,7 +45,7 @@ pub fn add_package(upstream_dir: &Path, package: Package) -> Result<(), RixError
     writer::write_content_to_file(&file_path, &content)
 }
 
-pub fn remove_package_from_file(name: &str, file_path: &Path) -> Result<(), RixError> {
+pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<String>) -> Result<(), RixError> {
     let mut content = fs::read_to_string(file_path)?;
     let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
     let list_node = parser::find_list_node(&root_node)
@@ -48,7 +55,18 @@ pub fn remove_package_from_file(name: &str, file_path: &Path) -> Result<(), RixE
 
     for child in list_node.children() {
         let text = child.text().to_string().trim().to_string();
-        let pkg_name = text.strip_prefix("pkgs.").unwrap_or(&text);
+        
+        // Smart matching: check if it's a standard package or a nixGL wrapped shell script
+        let pkg_name = if text.starts_with("(pkgs.writeShellScriptBin") {
+            let parts: Vec<&str> = text.split('"').collect();
+            if parts.len() >= 3 {
+                parts[1].to_string() // Extracts the package name from the quotes
+            } else {
+                text.clone()
+            }
+        } else {
+            text.strip_prefix("pkgs.").unwrap_or(&text).to_string()
+        };
 
         if pkg_name == name {
             let mut start_idx: usize = child.text_range().start().into();
@@ -81,11 +99,16 @@ pub fn remove_package_from_file(name: &str, file_path: &Path) -> Result<(), RixE
                 match sibling {
                     rowan::NodeOrToken::Token(token) => {
                         if token.kind() == SyntaxKind::TOKEN_WHITESPACE {
-                            if token.text().contains('\n') {
-                                break; // Do not consume the previous line's newline!
+                            let text = token.text();
+                            if let Some(pos) = text.rfind('\n') {
+                                // DEFENSIVE FIX: The whitespace token contains a newline bundled with spaces.
+                                // We advance start_idx past the newline to consume ONLY the indentation spaces.
+                                start_idx = usize::from(token.text_range().start()) + pos + 1;
+                                break;
+                            } else {
+                                start_idx = token.text_range().start().into();
+                                prev_sibling = token.prev_sibling_or_token();
                             }
-                            start_idx = token.text_range().start().into();
-                            prev_sibling = token.prev_sibling_or_token();
                         } else {
                             break;
                         }

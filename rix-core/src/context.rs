@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use crate::{verify, system, ops, writer, discovery};
+use crate::{verify, system, ops, writer, discovery, hardware};
 use crate::errors::RixError;
 use crate::discovery::FoundPackage;
 
@@ -33,7 +33,7 @@ impl RixContext {
                 let nix_path = "/nix/var/nix/profiles/default/bin";
                 if !current_path.contains(nix_path) {
                     // SAFETY: Modifying the environment is unsafe in multithreaded contexts.
-                    // This is safe here because Context initialization happens synchronously 
+                    // This is safe here because Context initialization happens synchronously  
                     // at application startup before any threads are spawned.
                     unsafe {
                         std::env::set_var("PATH", format!("{}:{}", current_path, nix_path));
@@ -77,8 +77,11 @@ impl RixContext {
         let group_name = package.group.clone();
         let target_file = self.config_dir.join(format!("groups/upstream/{}.nix", group_name));
         
-        // 1. Add the package to the group module
-        ops::add_package(&self.config_dir.join("groups/upstream"), package)?;
+        // Fetch the hardware wrapper if a lockfile exists
+        let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
+
+        // 1. Add the package to the group module (passing the wrapper down)
+        ops::add_package(&self.config_dir.join("groups/upstream"), package, wrapper)?;
         
         // 2. Ensure this group is dynamically imported into the master flake.nix
         ops::link_group_to_flake(&self.config_dir, &group_name)?;
@@ -96,7 +99,13 @@ impl RixContext {
     }
 
     pub fn remove_package_from_file(&self, name: &str, file_path: &PathBuf) -> Result<(), RixError> {
-        ops::remove_package_from_file(name, file_path)?;
+        // Fetch the hardware wrapper if a lockfile exists
+        let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
+
+        // Pass the wrapper down to match the function signature, 
+        // though our new bulletproof ops::list.rs safely ignores it during removal.
+        ops::remove_package_from_file(name, file_path, wrapper)?;
+        
         verify::verify_nix_syntax(file_path)
     }
 

@@ -64,3 +64,23 @@ pub fn generate_hardware_lock(config_dir: &PathBuf) -> Result<(), std::io::Error
     
     Ok(())
 }
+
+pub fn get_nixgl_wrapper(config_dir: &PathBuf) -> Option<String> {
+    let lock_path = config_dir.join("hardware.lock");
+    
+    if let Ok(content) = fs::read_to_string(&lock_path) {
+        for line in content.lines() {
+            if line.starts_with("nixgl_wrapper") {
+                let parts: Vec<&str> = line.split('=').collect();
+                if parts.len() == 2 {
+                    // Extract the value and strip the quotes/whitespace
+                    let wrapper = parts[1].trim().trim_matches('"');
+                    return Some(wrapper.to_string());
+                }
+            }
+        }
+    }
+    
+    // Return None if the file doesn't exist or parsing fails
+    None
+}

@@ -10,7 +10,7 @@ pub fn write_content_to_file(file_path: &Path, content: &str) -> Result<(), RixE
     if !parse.errors().is_empty() {
         let err_msgs: Vec<String> = parse.errors().iter().map(|e| e.to_string()).collect();
         return Err(RixError::InvalidNixSyntax(format!(
-            "rnix AST validation failed before write: {:?}", 
+            "rnix AST validation failed before write: {:?}",  
             err_msgs
         )));
     }
@@ -22,14 +22,13 @@ pub fn write_content_to_file(file_path: &Path, content: &str) -> Result<(), RixE
     Ok(())
 }
 
-/// Formats and serializes a collection of package tuples back into standard Nix list format
-pub fn write_nix_file(file_path: &Path, packages: Vec<(String, String)>) -> Result<(), RixError> {
+/// Formats and serializes a collection of package tuples back into standard Nix list format.
+/// Injects the nixGL wrapper if a hardware lockfile specifies one.
+pub fn write_nix_file(file_path: &Path, packages: Vec<(String, String)>, nixgl_wrapper: Option<String>) -> Result<(), RixError> {
     let mut content = String::from("{ pkgs, ... }:\n[\n");
     
     for (name, description) in packages {
         // DEFENSIVE FIX: Smart prefixing.
-        // If the user manually added a complex Nix expression, raw string, or functional block, 
-        // we leave it completely intact instead of blindly destroying it with a `pkgs.` prefix.
         let is_complex_expr = name.starts_with('(') || 
                               name.starts_with('{') || 
                               name.starts_with('[') || 
@@ -40,7 +39,12 @@ pub fn write_nix_file(file_path: &Path, packages: Vec<(String, String)>) -> Resu
         let formatted_name = if is_complex_expr {
             name.to_string()
         } else {
-            format!("  pkgs.{}", name)
+            // If a wrapper exists, wrap the binary. Otherwise, just prefix with pkgs.
+            if let Some(ref wrapper) = nixgl_wrapper {
+                format!("  (pkgs.writeShellScriptBin \"{}\" ''exec ${{pkgs.nixgl.{}}}/bin/{} ${{pkgs.{}}}/bin/{}'')", name, wrapper, wrapper, name, name)
+            } else {
+                format!("  pkgs.{}", name)
+            }
         };
 
         // Avoid trailing '#' syntax errors if there is no comment attached
@@ -57,7 +61,7 @@ pub fn write_nix_file(file_path: &Path, packages: Vec<(String, String)>) -> Resu
     write_content_to_file(file_path, &content)
 }
 
-/// Returns the master entry point Flake file layout, injected with user environment variables
+/// Returns the master entry point Flake file layout, injected with user environment variables and nixGL
 pub fn get_bootstrap_flake_template() -> String {
     let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let home = env::var("HOME").unwrap_or_else(|_| format!("/home/{}", user));
@@ -65,10 +69,9 @@ pub fn get_bootstrap_flake_template() -> String {
     let arch = match env::consts::ARCH {
         "x86_64" => "x86_64-linux",
         "aarch64" => "aarch64-linux",
-        _ => "x86_64-linux", 
+        _ => "x86_64-linux",  
     };
 
-    // Fixed the import path to match the CLI's default group
     format!(r#"{{
   description = "Rix automated system layout profile configuration";
 
@@ -78,12 +81,16 @@ pub fn get_bootstrap_flake_template() -> String {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     }};
+    nixgl.url = "github:nix-community/nixGL"; # <-- ADDED NIXGL INPUT
   }};
 
-  outputs = {{ self, nixpkgs, home-manager, ... }}:
+  outputs = {{ self, nixpkgs, home-manager, nixgl, ... }}:
     let
       system = "{}";
-      pkgs = nixpkgs.legacyPackages.${{system}};
+      pkgs = import nixpkgs {{
+        inherit system;
+        overlays = [ nixgl.overlay ]; # <-- APPLIED NIXGL OVERLAY
+      }};
     in {{
       homeConfigurations."{}" = home-manager.lib.homeManagerConfiguration {{
         inherit pkgs;
