@@ -7,6 +7,15 @@ use crate::commands::package::format_package_name;
 
 pub fn handle_init(ctx: &RixContext) {
     handlers::execute_init(ctx);
+    
+    // Wire up Git init!
+    if let Err(e) = rix_core::system::sync::init_local_repo(&ctx.config_dir) {
+        eprintln!("⚠️ Warning: Failed to initialize Git repository: {:?}", e);
+    } else {
+        println!("✅ Initialized local Git repository for version control.");
+        // Do a base commit so the first installs have a clean working tree
+        let _ = rix_core::system::sync::auto_commit(&ctx.config_dir, "rix: initialized environment");
+    }
 }
 
 pub fn handle_update(ctx: &RixContext) {

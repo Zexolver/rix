@@ -47,7 +47,7 @@ pub fn format_package_name(raw_name: &str) -> String {
 pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, description: Option<String>) {
     let mut needs_upgrade = false;
 
-    for name in packages {
+    for name in &packages {
         // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
         if name.starts_with("http://") || name.starts_with("https://") || name.contains(':') {
             println!("🌐 Detected external flake URI for '{}'. Normalizing...", name);
@@ -110,6 +110,12 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
             eprintln!("Failed to apply target updates to environment: {:?}", e);
         } else {
             println!("✅ Successfully updated environment generation!");
+            
+            // Auto-commit the successfully installed packages
+            let commit_msg = format!("rix: installed {}", packages.join(", "));
+            if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
+                eprintln!("⚠️ Warning: Failed to auto-commit changes: {:?}", e);
+            }
         }
     }
 }
@@ -156,8 +162,14 @@ pub fn handle_search(_ctx: &RixContext, query: String) {
 }
 
 pub fn handle_remove(ctx: &RixContext, packages: Vec<String>) {
-    for name in packages {
-        handlers::handle_interactive_removal(ctx, &name);
+    for name in &packages {
+        handlers::handle_interactive_removal(ctx, name);
+    }
+    
+    // Auto-commit the successfully removed packages
+    let commit_msg = format!("rix: removed {}", packages.join(", "));
+    if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
+        eprintln!("⚠️ Warning: Failed to auto-commit changes: {:?}", e);
     }
 }
 
