@@ -7,7 +7,7 @@ pub fn detect_and_lock_hardware(config_dir: &PathBuf) -> Result<(), RixError> {
     println!("Detecting system GPU hardware...");
     
     // Default to the open-source Mesa wrapper if we can't find anything
-    let mut wrapper = "nixGLDefault";  
+    let mut wrapper = "nixGLIntel";  
     
     if let Ok(entries) = fs::read_dir("/sys/class/drm") {
         for entry in entries.flatten() {
@@ -25,7 +25,7 @@ pub fn detect_and_lock_hardware(config_dir: &PathBuf) -> Result<(), RixError> {
                         break; // Nvidia takes priority on hybrid laptops
                     } else if vid == "0x1002" {
                         println!("Found AMD GPU (Vendor: {})", vid);
-                        wrapper = "nixGLDefault"; // ✅ Fixed: Maps AMD to Default/Mesa wrapper
+                        wrapper = "nixGLIntel"; // ✅ Fixed: Maps AMD to Intel/Mesa wrapper
                     } else if vid == "0x8086" {
                         println!("Found Intel GPU (Vendor: {})", vid);
                         wrapper = "nixGLIntel";
