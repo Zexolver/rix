@@ -2,6 +2,7 @@ use rix_core::{Package, RixContext};
 use rix_core::parser;
 use rix_core::ops::flake;
 use regex::Regex;
+use std::sync::OnceLock;
 use crate::handlers;
 use crate::ui;
 
@@ -11,13 +12,17 @@ pub fn format_package_name(raw_name: &str) -> String {
     let clean_raw = raw_name.trim_matches(|c| c == '(' || c == ')');
 
     // 1. External flakes: __ext_flake or (alias.packages.${pkgs.system}.default)
-    let ext_re = Regex::new(r"__ext_flake or \(([^.]+)\.packages").unwrap();
+    static EXT_RE: OnceLock<Regex> = OnceLock::new();
+    let ext_re = EXT_RE.get_or_init(|| Regex::new(r"__ext_flake or \(([^.]+)\.packages").unwrap());
     if let Some(caps) = ext_re.captures(raw_name) {
         return caps.get(1).unwrap().as_str().to_string();
     }
 
     // 2. Conditional expressions: if pkgs.stdenv.isLinux then pkgs.foo else pkgs.bar (or null)
-    let cond_re = Regex::new(r"if\s+pkgs\.stdenv\.isLinux\s+then\s+pkgs\.([^\s]+)\s+else\s+(pkgs\.([^\s]+)|null)").unwrap();
+    static COND_RE: OnceLock<Regex> = OnceLock::new();
+    let cond_re = COND_RE.get_or_init(|| {
+        Regex::new(r"if\s+pkgs\.stdenv\.isLinux\s+then\s+pkgs\.([^\s]+)\s+else\s+(pkgs\.([^\s]+)|null)").unwrap()
+    });
     if let Some(caps) = cond_re.captures(clean_raw) {
         let linux_pkg = caps.get(1).unwrap().as_str();
         let else_match = caps.get(2).unwrap().as_str();
@@ -114,7 +119,7 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
             // Auto-commit the successfully installed packages
             let commit_msg = format!("rix: installed {}", packages.join(", "));
             if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
-                eprintln!("⚠️ Warning: Failed to auto-commit changes: {:?}", e);
+                eprintln!("⚠ Warning: Failed to auto-commit changes: {:?}", e);
             }
         }
     }
@@ -137,9 +142,11 @@ pub fn handle_search(_ctx: &RixContext, query: String) {
                 for (path, desc) in results.iter().take(display_limit) {
                     let short_path = path.splitn(3, '.').nth(2).unwrap_or(path);
                     
-                    // Truncate description so it doesn't wrap wildly in standard terminals
+                    // UTF-8 SAFE TRUNCATION: Avoid byte-slicing panics if descriptions contain multi-byte characters
                     let clean_desc = if desc.len() > 60 {
-                        format!("{}...", &desc[..57])
+                        let mut truncated = desc.chars().take(57).collect::<String>();
+                        truncated.push_str("...");
+                        truncated
                     } else {
                         desc.to_string()
                     };
@@ -169,7 +176,7 @@ pub fn handle_remove(ctx: &RixContext, packages: Vec<String>) {
     // Auto-commit the successfully removed packages
     let commit_msg = format!("rix: removed {}", packages.join(", "));
     if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
-        eprintln!("⚠️ Warning: Failed to auto-commit changes: {:?}", e);
+        eprintln!("⚠ Warning: Failed to auto-commit changes: {:?}", e);
     }
 }
 
