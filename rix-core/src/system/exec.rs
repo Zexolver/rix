@@ -14,7 +14,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
-            // Filter out common Nix/CMake build noise from the terminal
+            // Filter out common Nix/CMake build noise and redundant fetch logs from the terminal
             if line.contains("%]")   
                 || line.contains("Built target")   
                 || line.contains("Install the project...")
@@ -25,6 +25,8 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 || line.contains("making symlink relative")
                 || line.contains("checking for references")
                 || line.contains("gzipping man pages")
+                || line.contains("fetching path input")
+                || line.contains("fetching github input")
             {
                 continue; // Skip these lines silently
             }

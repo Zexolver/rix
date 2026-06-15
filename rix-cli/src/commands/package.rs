@@ -44,66 +44,72 @@ pub fn format_package_name(raw_name: &str) -> String {
     clean_raw.to_string()
 }
 
-pub fn handle_install(ctx: &RixContext, name: String, group: String, description: Option<String>) {
-    // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
-    if name.starts_with("http://") || name.starts_with("https://") || name.contains(':') {
-        println!("🌐 Detected external flake URI. Normalizing...");
-        
-        let uri = parser::normalize_flake_uri(&name);
-        let alias = parser::infer_flake_alias(&uri);  
-        
-        println!("💉 Injecting flake input '{}' into flake.nix...", alias);
-        if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
-            eprintln!("Failed to inject flake input: {:?}", e);
-            std::process::exit(1);
+pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, description: Option<String>) {
+    let mut needs_upgrade = false;
+
+    for name in packages {
+        // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
+        if name.starts_with("http://") || name.starts_with("https://") || name.contains(':') {
+            println!("🌐 Detected external flake URI for '{}'. Normalizing...", name);
+            
+            let uri = parser::normalize_flake_uri(&name);
+            let alias = parser::infer_flake_alias(&uri);   
+            
+            println!("💉 Injecting flake input '{}' into flake.nix...", alias);
+            if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
+                eprintln!("Failed to inject flake input: {:?}", e);
+                std::process::exit(1);
+            }
+            
+            // Wrap in parentheses to bypass the writer's auto-prefixing, and safely quote the architecture interpolation
+            let pkg_expr = format!("__ext_flake or ({}.packages.${{pkgs.system}}.default)", alias);
+            let desc = description.clone().unwrap_or_else(|| format!("External flake: {}", uri));
+            
+            println!("📦 Adding package output to environment...");
+            handlers::execute_add(ctx, Package {
+                name: pkg_expr,
+                group: group.clone(),
+                description: Some(desc),
+                is_local_recipe: false,
+            });
+            
+            needs_upgrade = true;
+            continue;
         }
+
+        // Coerce the runtime String into a &'static str so the spinner can safely hold it
+        let message = Box::leak(format!("Querying upstream package indices for '{}'...", name).into_boxed_str());
+        let spinner = ui::create_spinner(message);
         
-        // Wrap in parentheses to bypass the writer's auto-prefixing, and safely quote the architecture interpolation
-        let pkg_expr = format!("__ext_flake or ({}.packages.${{pkgs.system}}.default)", alias);
-        let desc = description.unwrap_or_else(|| format!("External flake: {}", uri));
-        
-        println!("📦 Adding package output to environment...");
-        handlers::execute_add(ctx, Package {
-            name: pkg_expr,
-            group,
-            description: Some(desc),
-            is_local_recipe: false,
-        });
-        
+        match rix_core::verify::verify_online_package_architecture(&name) {
+            Ok(verified_name) => {
+                // Drop the spinner completely before modifying state files or prompting for sudo
+                spinner.finish_and_clear();
+                
+                handlers::execute_add(ctx, Package {   
+                    name: verified_name,   
+                    description: description.clone(),   
+                    group: group.clone(),   
+                    is_local_recipe: false   
+                });
+                
+                needs_upgrade = true;
+            }
+            Err(e) => {
+                spinner.finish_and_clear();
+                eprintln!("{:?}", e);   
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if needs_upgrade {
+        println!("Successfully optimized environment config changes!");
         println!("Applying environmental upgrade generations...");
         if let Err(e) = ctx.apply_upgrade(false) {
             eprintln!("Failed to apply target updates to environment: {:?}", e);
         } else {
-            println!("✅ Successfully installed remote flake '{}'", alias);
-        }
-        return;
-    }
-
-    // Coerce the runtime String into a &'static str so the spinner can safely hold it
-    let message = Box::leak(format!("Querying upstream package indices for '{}'...", name).into_boxed_str());
-    let spinner = ui::create_spinner(message);
-    
-    match rix_core::verify::verify_online_package_architecture(&name) {
-        Ok(verified_name) => {
-            // Drop the spinner completely before modifying state files or prompting for sudo
-            spinner.finish_and_clear();
-            
-            handlers::execute_add(ctx, Package {   
-                name: verified_name,   
-                description,   
-                group,   
-                is_local_recipe: false   
-            });
-                                                                
-            println!("Applying environmental upgrade generations...");
-            if let Err(e) = ctx.apply_upgrade(false) {
-                eprintln!("Failed to apply target updates to environment: {:?}", e);
-            }
-        }
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{:?}", e);   
-            std::process::exit(1);
+            println!("✅ Successfully updated environment generation!");
         }
     }
 }
@@ -149,8 +155,10 @@ pub fn handle_search(_ctx: &RixContext, query: String) {
     }
 }
 
-pub fn handle_remove(ctx: &RixContext, name: String) {
-    handlers::handle_interactive_removal(ctx, &name);
+pub fn handle_remove(ctx: &RixContext, packages: Vec<String>) {
+    for name in packages {
+        handlers::handle_interactive_removal(ctx, &name);
+    }
 }
 
 pub fn handle_purge(ctx: &RixContext, group: String) {

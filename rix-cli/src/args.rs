@@ -12,10 +12,11 @@ pub enum Commands {
     /// [Beginner] Initialize a new declarative Nix environment profile layout scaffolding
     Init,
 
-    /// [Beginner] Install an upstream package directly (e.g., 'rix install eza')
+    /// [Beginner] Install upstream packages directly (e.g., 'rix install eza ripgrep')
     Install {
-        /// Name of the package to install
-        name: String,
+        /// Names of the packages to install
+        #[arg(required = true)]
+        packages: Vec<String>,
         /// Profile group to place the package in
         #[arg(short, long, default_value = "default")]
         group: String,
@@ -30,10 +31,11 @@ pub enum Commands {
         query: String,
     },
 
-    /// [Beginner] Remove a package cleanly (e.g., 'rix remove eza')
+    /// [Beginner] Remove packages cleanly (e.g., 'rix remove eza ripgrep')
     Remove {
-        /// Name of the package to remove
-        name: String,
+        /// Names of the packages to remove
+        #[arg(required = true)]
+        packages: Vec<String>,
     },
 
     /// [Beginner] Purge an entire package profile group configuration file

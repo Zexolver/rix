@@ -18,9 +18,9 @@ pub fn handle(cli: Cli, ctx: RixContext) {
         Commands::Rollback { version } => environment::handle_rollback(&ctx, version),
         
         // Package lifecycle commands
-        Commands::Install { name, group, description } => package::handle_install(&ctx, name, group, description),
+        Commands::Install { packages, group, description } => package::handle_install(&ctx, packages, group, description),
         Commands::Search { query } => package::handle_search(&ctx, query),
-        Commands::Remove { name } => package::handle_remove(&ctx, name),
+        Commands::Remove { packages } => package::handle_remove(&ctx, packages),
         Commands::Purge { group } => package::handle_purge(&ctx, group),
 
         // Native profile manipulation
