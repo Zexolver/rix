@@ -77,6 +77,12 @@ pub enum Commands {
         version: Option<String>,
     },
 
+    /// [Maintenance] Sync local declarative state to an upstream Git repository
+    Sync {
+        /// Optional Git repository URL to set as the upstream remote
+        remote_url: Option<String>,
+    },
+
     /// [Intermediate] Native Nix-style profile manipulation interface
     #[command(subcommand)]
     Profile(ProfileCommands),

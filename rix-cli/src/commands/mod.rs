@@ -17,6 +17,16 @@ pub fn handle(cli: Cli, ctx: RixContext) {
         Commands::History => environment::handle_history(&ctx),
         Commands::Rollback { version } => environment::handle_rollback(&ctx, version),
         
+        // Remote Sync
+        Commands::Sync { remote_url } => {
+            println!("🔄 Syncing declarative state to remote...");
+            if let Err(e) = rix_core::system::sync::sync_to_remote(&ctx.config_dir, remote_url.as_deref()) {
+                eprintln!("❌ Sync failed: {}", e);
+            } else {
+                println!("✅ Successfully synced environment state to remote!");
+            }
+        }
+        
         // Package lifecycle commands
         Commands::Install { packages, group, description } => package::handle_install(&ctx, packages, group, description),
         Commands::Search { query } => package::handle_search(&ctx, query),
