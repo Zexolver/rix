@@ -5,6 +5,7 @@ use regex::Regex;
 use std::sync::OnceLock;
 use crate::handlers;
 use crate::ui;
+use crate::commands::environment::elevate_privileges;
 
 /// Formats raw Nix AST strings into human-readable package names for the UI table.
 pub fn format_package_name(raw_name: &str) -> String {
@@ -50,6 +51,10 @@ pub fn format_package_name(raw_name: &str) -> String {
 }
 
 pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, description: Option<String>) {
+    if ctx.is_system && unsafe { libc::geteuid() != 0 } {
+        elevate_privileges();
+    }
+
     let mut needs_upgrade = false;
 
     for name in &packages {
@@ -169,6 +174,10 @@ pub fn handle_search(_ctx: &RixContext, query: String) {
 }
 
 pub fn handle_remove(ctx: &RixContext, packages: Vec<String>) {
+    if ctx.is_system && unsafe { libc::geteuid() != 0 } {
+        elevate_privileges();
+    }
+
     for name in &packages {
         handlers::handle_interactive_removal(ctx, name);
     }
@@ -181,6 +190,10 @@ pub fn handle_remove(ctx: &RixContext, packages: Vec<String>) {
 }
 
 pub fn handle_purge(ctx: &RixContext, group: String) {
+    if ctx.is_system && unsafe { libc::geteuid() != 0 } {
+        elevate_privileges();
+    }
+
     println!("Purging profile group configuration layout '{}'...", group);
     if let Err(e) = ctx.purge_group_profile(&group) {
         eprintln!("Purge sequence failed: {:?}", e);

@@ -16,7 +16,7 @@ use std::os::unix::process::CommandExt;
 pub(crate) fn elevate_privileges() {
     let args: Vec<String> = std::env::args().collect();
     let err = Command::new("sudo")
-        .arg("-E")
+        .arg("-H")
         .args(&args)
         .exec();
     eprintln!("❌ Failed to automatically elevate privileges via sudo: {:?}", err);
