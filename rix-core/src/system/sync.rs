@@ -95,11 +95,34 @@ pub fn sync_to_remote(config_dir: &Path, remote_url: Option<&str>) -> Result<(),
         }
     }
 
-    // 3. Push to the remote (inherits the user's standard SSH/HTTPS credentials)
-    let status = Command::new("git")
-        .current_dir(config_dir)
-        .args(["push", "-u", "origin", "main"])
-        .status() // We leave stdout/stderr attached here so the user sees Git's native upload progress!
+    // 3. Construct the push command structure
+    let mut push_cmd = Command::new("git");
+    push_cmd.current_dir(config_dir).args(["push", "-u", "origin", "main"]);
+
+    // 🌟 AUTOMAGIC PRIVILEGE BRIDGE: Detect if root context is executing via sudo
+    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        let user_home = format!("/home/{}", sudo_user);
+        let ed25519_key = format!("{}/.ssh/id_ed25519", user_home);
+        let rsa_key = format!("{}/.ssh/id_rsa", user_home);
+
+        // Map candidate private key locations
+        let key_path = if Path::new(&ed25519_key).exists() {
+            Some(ed25519_key)
+        } else if Path::new(&rsa_key).exists() {
+            Some(rsa_key)
+        } else {
+            None
+        };
+
+        // Inject environment bypass for the spawned Git process if a key match hits
+        if let Some(key) = key_path {
+            push_cmd.env("GIT_SSH_COMMAND", format!("ssh -i {} -o IdentitiesOnly=yes", key));
+        }
+    }
+
+    // 4. Push to the remote (inherits native console feedback)
+    let status = push_cmd
+        .status()
         .map_err(|e| RixError::IOError(Error::new(ErrorKind::Other, format!("Failed to execute git push: {}", e))))?;
 
     if !status.success() {
