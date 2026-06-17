@@ -4,13 +4,12 @@ use std::fmt;
 pub enum RixError {
     IOError(std::io::Error),
     ParseError(String),
-    /// Host is missing critical Nix tooling dependencies
     MissingSystemDependency(String),
-    /// The generated file contains syntax that failed validation
     InvalidNixSyntax(String),
+    // Add the new Git error variant
+    GitError(git2::Error), 
 }
 
-// 1. Implement Display to format the errors cleanly for the end-user
 impl fmt::Display for RixError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -18,15 +17,23 @@ impl fmt::Display for RixError {
             RixError::ParseError(msg) => write!(f, "Parse Error: {}", msg),
             RixError::MissingSystemDependency(msg) => write!(f, "Missing System Dependency: {}", msg),
             RixError::InvalidNixSyntax(msg) => write!(f, "Invalid Nix Syntax: {}", msg),
+            // Add display mapping for Git errors
+            RixError::GitError(err) => write!(f, "Git Repository Error: {}", err),
         }
     }
 }
 
-// 2. Implement standard Error trait so it plays nice with the Rust ecosystem
 impl std::error::Error for RixError {}
 
 impl From<std::io::Error> for RixError {
     fn from(error: std::io::Error) -> Self {
         RixError::IOError(error)
+    }
+}
+
+// Add the automatic conversion trait for git2::Error
+impl From<git2::Error> for RixError {
+    fn from(error: git2::Error) -> Self {
+        RixError::GitError(error)
     }
 }

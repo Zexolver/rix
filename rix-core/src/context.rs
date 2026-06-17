@@ -33,7 +33,7 @@ impl RixContext {
                 let nix_path = "/nix/var/nix/profiles/default/bin";
                 if !current_path.contains(nix_path) {
                     // SAFETY: Modifying the environment is unsafe in multithreaded contexts.
-                    // This is safe here because Context initialization happens synchronously  
+                    // This is safe here because Context initialization happens synchronously   
                     // at application startup before any threads are spawned.
                     unsafe {
                         std::env::set_var("PATH", format!("{}:{}", current_path, nix_path));
@@ -51,10 +51,10 @@ impl RixContext {
 
     pub fn initialize_layout(&self) -> Result<(), RixError> {
         self.verify_system()?;
-        
+         
         let upstream_dir = self.config_dir.join("groups/upstream");
         let local_dir = self.config_dir.join("groups/local");
-        
+         
         fs::create_dir_all(&upstream_dir)?;
         fs::create_dir_all(&local_dir)?;
 
@@ -68,24 +68,27 @@ impl RixContext {
             writer::write_content_to_file(&default_upstream, writer::get_empty_group_template())?;
         }
 
+        // Initialize Git and snapshot the layout immediately after file creation
+        crate::git::initialize_state_repo(&self.config_dir)?;
+
         Ok(())
     }
 
     pub fn add_package(&self, package: Package) -> Result<(), RixError> {
         self.initialize_layout()?;
-        
+         
         let group_name = package.group.clone();
         let target_file = self.config_dir.join(format!("groups/upstream/{}.nix", group_name));
-        
+         
         // Fetch the hardware wrapper if a lockfile exists
         let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
 
         // 1. Add the package to the group module (passing the wrapper down)
         ops::add_package(&self.config_dir.join("groups/upstream"), package, wrapper)?;
-        
+         
         // 2. Ensure this group is dynamically imported into the master flake.nix
         ops::link_group_to_flake(&self.config_dir, &group_name)?;
-        
+         
         // 3. Verify final syntax
         verify::verify_nix_syntax(&target_file)
     }
@@ -102,10 +105,10 @@ impl RixContext {
         // Fetch the hardware wrapper if a lockfile exists
         let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
 
-        // Pass the wrapper down to match the function signature, 
+        // Pass the wrapper down to match the function signature,  
         // though our new bulletproof ops::list.rs safely ignores it during removal.
         ops::remove_package_from_file(name, file_path, wrapper)?;
-        
+         
         verify::verify_nix_syntax(file_path)
     }
 
