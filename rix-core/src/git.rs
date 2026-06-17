@@ -1,19 +1,17 @@
 use git2::{Repository, IndexAddOption, Signature, Config};
 use std::path::Path;
+use std::env;
 use crate::errors::RixError;
 
 pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
-    // 0. Automatically trust the directory to bypass Git's "dubious ownership" warning.
-    if let Ok(mut config) = Config::open_default() {
-        let path_str = target_dir.to_string_lossy();
-        
+    let path_str = target_dir.to_string_lossy();
+    
+    // Helper closure to apply the safe.directory whitelist to any given Config
+    let apply_safe_dir = |mut config: Config| {
         let mut already_safe = false;
-        
-        // ConfigEntries provides an iterator-like interface via next()
         if let Ok(mut entries) = config.entries(Some("safe.directory")) {
             while let Some(entry) = entries.next() {
                 if let Ok(entry) = entry {
-                    // In git2 v0.21+, value() returns a Result, so we unpack it
                     if let Ok(val) = entry.value() {
                         if val == path_str.as_ref() {
                             already_safe = true;
@@ -23,11 +21,21 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
                 }
             }
         }
-        
         if !already_safe {
-            // "^$" matches nothing, which tells libgit2 to append to the multivar 
-            // without overwriting any existing safe.directory paths.
             let _ = config.set_multivar("safe.directory", "^$", path_str.as_ref());
+        }
+    };
+
+    // 0a. Apply to the current user's default config (Root, if running via sudo)
+    if let Ok(config) = Config::open_default() {
+        apply_safe_dir(config);
+    }
+
+    // 0b. Apply to the invoking user's config so they can manually inspect the repo without sudo
+    if let Ok(sudo_user) = env::var("SUDO_USER") {
+        let user_config_path = format!("/home/{}/.gitconfig", sudo_user);
+        if let Ok(config) = Config::open(Path::new(&user_config_path)) {
+            apply_safe_dir(config);
         }
     }
 
