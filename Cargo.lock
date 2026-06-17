@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "rix-cli"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "clap",
  "indicatif 0.17.11",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "rix-core"
-version = "0.1.0"
+version = "0.4.1"
 dependencies = [
  "git2",
  "indicatif 0.18.4",
