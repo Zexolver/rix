@@ -43,10 +43,10 @@ impl RixContext {
 
     pub fn initialize_layout(&self) -> Result<(), RixError> {
         self.verify_system()?;
-          
+           
         let upstream_dir = self.config_dir.join("groups/upstream");
         let local_dir = self.config_dir.join("groups/local");
-          
+           
         fs::create_dir_all(&upstream_dir)?;
         fs::create_dir_all(&local_dir)?;
 
@@ -72,15 +72,15 @@ impl RixContext {
         if package.name.contains("://") || package.name.starts_with("github:") || package.name.starts_with("gitlab:") {
             verify::verify_flake_resolves(&package.name)?;
         }
-          
+           
         let group_name = package.group.clone();
         let target_file = self.config_dir.join(format!("groups/upstream/{}.nix", group_name));
-          
+           
         let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
 
         ops::add_package(&self.config_dir.join("groups/upstream"), package, wrapper)?;
         ops::link_group_to_flake(&self.config_dir, &group_name)?;
-          
+           
         verify::verify_nix_syntax(&target_file)
     }
 
@@ -120,6 +120,11 @@ impl RixContext {
                 // SUCCESS: Lock in the new state automatically
                 if !dry_run {
                     let _ = git::commit_state(&self.config_dir, "chore: automated Rix environment update");
+                    
+                    // 🌟 NEW: Bridge binaries to /usr/local/bin if system-wide
+                    if self.is_system {
+                        let _ = system::bridge_system_binaries();
+                    }
                 }
                 Ok(())
             }

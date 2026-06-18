@@ -136,3 +136,38 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
 
     run_quiet_command(cmd, "Failed to materialize declarative generation updates")
 }
+// Add this to the bottom of rix-core/src/system/exec.rs
+
+use std::fs;
+use std::os::unix::fs::symlink;
+
+/// Bridges Nix binaries into standard system paths so `sudo` can find them
+pub fn bridge_system_binaries() -> Result<(), RixError> {
+    let source_bin_dir = Path::new("/nix/var/nix/profiles/default/bin");
+    let target_bin_dir = Path::new("/usr/local/bin");
+
+    if !source_bin_dir.exists() {
+        return Ok(()); // Nothing to bridge
+    }
+
+    for entry in fs::read_dir(source_bin_dir).map_err(|e| RixError::ParseError(e.to_string()))? {
+        let entry = entry.map_err(|e| RixError::ParseError(e.to_string()))?;
+        let source_path = entry.path();
+        
+        if let Some(file_name) = source_path.file_name() {
+            let target_path = target_bin_dir.join(file_name);
+
+            // Clean up old symlinks if they exist
+            if target_path.exists() || target_path.is_symlink() {
+                let _ = fs::remove_file(&target_path); 
+            }
+
+            // Create the new symlink
+            symlink(&source_path, &target_path).map_err(|e| {
+                RixError::ParseError(format!("Failed to bridge binary {:?}: {}", file_name, e))
+            })?;
+        }
+    }
+    
+    Ok(())
+}
