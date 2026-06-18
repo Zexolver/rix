@@ -1,8 +1,12 @@
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::io::{BufRead, BufReader};
 use std::time::Instant;
+
 use indicatif::{ProgressBar, ProgressStyle};
+
 use crate::errors::RixError;
 use super::platform::{detect_target_platform, TargetPlatform};
 
@@ -29,7 +33,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
-            // Filter out common Nix/CMake build noise
+            // Filter out common Nix/CMake build noise and ugly evaluation warnings
             if line.contains("%]")   
                 || line.contains("Built target")   
                 || line.contains("Install the project...")
@@ -42,8 +46,19 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 || line.contains("gzipping man pages")
                 || line.contains("fetching path input")
                 || line.contains("fetching github input")
+                || line.contains("fetching git input")
+                || line.contains("warning: Git tree")
+                || line.contains("warning: 'system' has been renamed")
+                || line.contains("warning: using or as an identifier is deprecated")
+                || line.contains("warning: Ignoring setting")
+                || line.trim().starts_with("at /nix/store/")
             {
-                continue; 
+                continue;  
+            }
+
+            // Filter out Nix's multi-line code snippets (e.g. " 121| " or "    |   ^ ")
+            if line.contains("| ") && (line.trim().starts_with(|c: char| c.is_ascii_digit()) || line.trim().starts_with('|')) {
+                continue;
             }
 
             // Hide the raw derivation path spam since the progress bar covers it
@@ -81,6 +96,11 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue; // Skip printing the raw build log
             }
 
+            // Skip any empty lines left over by the aggressive filtering above
+            if line.trim().is_empty() {
+                continue;
+            }
+
             // Print everything else cleanly ABOVE the progress bar so it doesn't break the UI
             pb.println(&line);
         }
@@ -93,7 +113,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
 
     if status.success() {
         // Cargo-style completion message
-        println!("    \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s", start_time.elapsed().as_secs_f64());
+        println!("   \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s", start_time.elapsed().as_secs_f64());
         Ok(())
     } else {
         Err(RixError::ParseError(error_msg.to_string()))
@@ -136,10 +156,6 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
 
     run_quiet_command(cmd, "Failed to materialize declarative generation updates")
 }
-// Add this to the bottom of rix-core/src/system/exec.rs
-
-use std::fs;
-use std::os::unix::fs::symlink;
 
 /// Bridges Nix binaries into standard system paths so `sudo` can find them
 pub fn bridge_system_binaries() -> Result<(), RixError> {
@@ -159,7 +175,7 @@ pub fn bridge_system_binaries() -> Result<(), RixError> {
 
             // Clean up old symlinks if they exist
             if target_path.exists() || target_path.is_symlink() {
-                let _ = fs::remove_file(&target_path); 
+                let _ = fs::remove_file(&target_path);  
             }
 
             // Create the new symlink
