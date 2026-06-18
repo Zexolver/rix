@@ -15,3 +15,20 @@ pub fn check_system_sanity() -> Result<(), RixError> {
     }
     Ok(())
 }
+
+/// Performs a dry-run check to ensure a remote flake URI actually resolves
+pub fn verify_flake_resolves(uri: &str) -> Result<(), RixError> {
+    let output = Command::new("nix")
+        .args(["flake", "metadata", uri, "--json"])
+        .output()?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(RixError::InvalidNixSyntax(format!(
+            "Flake validation failed. The target '{}' may not be a valid Nix flake.\n{}", 
+            uri, err_msg
+        )));
+    }
+    
+    Ok(())
+}

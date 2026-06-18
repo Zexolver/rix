@@ -1,4 +1,4 @@
-use git2::{Repository, IndexAddOption, Signature, Config};
+use git2::{Repository, IndexAddOption, Signature, Config, ResetType};
 use std::path::Path;
 use std::env;
 use crate::errors::RixError;
@@ -6,7 +6,6 @@ use crate::errors::RixError;
 pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     let path_str = target_dir.to_string_lossy();
     
-    // Helper closure to apply the safe.directory whitelist to any given Config
     let apply_safe_dir = |mut config: Config| {
         let mut already_safe = false;
         if let Ok(mut entries) = config.entries(Some("safe.directory")) {
@@ -26,12 +25,10 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
         }
     };
 
-    // 0a. Apply to the current user's default config (Root, if running via sudo)
     if let Ok(config) = Config::open_default() {
         apply_safe_dir(config);
     }
 
-    // 0b. Apply to the invoking user's config so they can manually inspect the repo without sudo
     if let Ok(sudo_user) = env::var("SUDO_USER") {
         let user_config_path = format!("/home/{}/.gitconfig", sudo_user);
         if let Ok(config) = Config::open(Path::new(&user_config_path)) {
@@ -39,29 +36,22 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
         }
     }
 
-    // Prevent double-initialization if the repo already exists
     if target_dir.join(".git").exists() {
         return Ok(());
     }
 
-    // 1. Initialize the barebone repository
     let repo = Repository::init(target_dir)?;
-
-    // 2. Stage all newly generated configuration files
     let mut index = repo.index()?;
     index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
     index.write()?;
 
-    // 3. Write the tree from the index
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
 
-    // 4. Resolve commit signature with a safe fallback
     let sig = repo.signature().unwrap_or_else(|_| {
         Signature::now("Rix Provisioner", "rix@local").unwrap()
     });
 
-    // 5. Create the initial root commit
     repo.commit(
         Some("HEAD"),  
         &sig,          
@@ -71,6 +61,35 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
         &[],           
     )?;
 
+    Ok(())
+}
+
+/// Commits the current working directory to lock in a known-good state
+pub fn commit_state(target_dir: &Path, message: &str) -> Result<(), RixError> {
+    let repo = Repository::open(target_dir)?;
+    let mut index = repo.index()?;
+    
+    index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+
+    let head = repo.head()?.peel_to_commit()?;
+    let sig = repo.signature().unwrap_or_else(|_| Signature::now("Rix System", "rix@local").unwrap());
+
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])?;
+    Ok(())
+}
+
+/// Hard resets the configuration directory, wiping away broken modifications
+pub fn rollback_to_head(target_dir: &Path) -> Result<(), RixError> {
+    let repo = Repository::open(target_dir)?;
+    
+    // Peel down to the commit, then reference it as a generic Object for the reset
+    let head_commit = repo.head()?.peel_to_commit()?;
+    
+    // Hard reset wipes working directory and index back to the last commit
+    repo.reset(head_commit.as_object(), ResetType::Hard, None)?;
     Ok(())
 }
 

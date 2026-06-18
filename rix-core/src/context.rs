@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use crate::{verify, system, ops, writer, discovery, hardware};
+use crate::{verify, system, ops, writer, discovery, hardware, git};
 use crate::errors::RixError;
 use crate::discovery::FoundPackage;
 
@@ -19,22 +19,14 @@ pub struct RixContext {
 
 impl RixContext {
     pub fn new(config_dir: PathBuf) -> Self {
-        // Automatically classify as system scope if targeting /etc/rix   
-        // or if the process was explicitly escalated via root/sudo privileges
         let is_system = config_dir.starts_with("/etc/rix")   
             || std::env::var("USER").unwrap_or_default() == "root"
             || std::env::var("SUDO_USER").is_ok();
 
-        // Security patch: `sudo` strips environment paths on standard Linux distributions.
-        // We inject the default Nix profile bin back into the Rust process environment PATH
-        // so all subsequent Command::new("nix") calls execute successfully when run under sudo.
         if is_system {
             if let Ok(current_path) = std::env::var("PATH") {
                 let nix_path = "/nix/var/nix/profiles/default/bin";
                 if !current_path.contains(nix_path) {
-                    // SAFETY: Modifying the environment is unsafe in multithreaded contexts.
-                    // This is safe here because Context initialization happens synchronously   
-                    // at application startup before any threads are spawned.
                     unsafe {
                         std::env::set_var("PATH", format!("{}:{}", current_path, nix_path));
                     }
@@ -51,10 +43,10 @@ impl RixContext {
 
     pub fn initialize_layout(&self) -> Result<(), RixError> {
         self.verify_system()?;
-         
+          
         let upstream_dir = self.config_dir.join("groups/upstream");
         let local_dir = self.config_dir.join("groups/local");
-         
+          
         fs::create_dir_all(&upstream_dir)?;
         fs::create_dir_all(&local_dir)?;
 
@@ -68,28 +60,27 @@ impl RixContext {
             writer::write_content_to_file(&default_upstream, writer::get_empty_group_template())?;
         }
 
-        // Initialize Git and snapshot the layout immediately after file creation
-        crate::git::initialize_state_repo(&self.config_dir)?;
+        git::initialize_state_repo(&self.config_dir)?;
 
         Ok(())
     }
 
     pub fn add_package(&self, package: Package) -> Result<(), RixError> {
         self.initialize_layout()?;
-         
+
+        // 1. PRE-FLIGHT CHECK: Sniff for external URIs and validate them
+        if package.name.contains("://") || package.name.starts_with("github:") || package.name.starts_with("gitlab:") {
+            verify::verify_flake_resolves(&package.name)?;
+        }
+          
         let group_name = package.group.clone();
         let target_file = self.config_dir.join(format!("groups/upstream/{}.nix", group_name));
-         
-        // Fetch the hardware wrapper if a lockfile exists
+          
         let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
 
-        // 1. Add the package to the group module (passing the wrapper down)
         ops::add_package(&self.config_dir.join("groups/upstream"), package, wrapper)?;
-         
-        // 2. Ensure this group is dynamically imported into the master flake.nix
         ops::link_group_to_flake(&self.config_dir, &group_name)?;
-         
-        // 3. Verify final syntax
+          
         verify::verify_nix_syntax(&target_file)
     }
 
@@ -102,13 +93,8 @@ impl RixContext {
     }
 
     pub fn remove_package_from_file(&self, name: &str, file_path: &PathBuf) -> Result<(), RixError> {
-        // Fetch the hardware wrapper if a lockfile exists
         let wrapper = hardware::get_nixgl_wrapper(&self.config_dir);
-
-        // Pass the wrapper down to match the function signature,  
-        // though our new bulletproof ops::list.rs safely ignores it during removal.
         ops::remove_package_from_file(name, file_path, wrapper)?;
-         
         verify::verify_nix_syntax(file_path)
     }
 
@@ -127,6 +113,23 @@ impl RixContext {
 
     pub fn apply_upgrade(&self, dry_run: bool) -> Result<(), RixError> {
         self.verify_system()?;
-        system::apply_upgrade(&self.config_dir, self.is_system, dry_run)
+        
+        // 2. TRANSACTIONAL BUILD: Attempt the upgrade
+        match system::apply_upgrade(&self.config_dir, self.is_system, dry_run) {
+            Ok(_) => {
+                // SUCCESS: Lock in the new state automatically
+                if !dry_run {
+                    let _ = git::commit_state(&self.config_dir, "chore: automated Rix environment update");
+                }
+                Ok(())
+            }
+            Err(e) => {
+                // FAILURE: Rollback to the previous known-good state automatically
+                if !dry_run {
+                    let _ = git::rollback_to_head(&self.config_dir);
+                }
+                Err(e)
+            }
+        }
     }
 }
