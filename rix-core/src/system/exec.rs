@@ -13,6 +13,8 @@ use super::platform::{detect_target_platform, TargetPlatform};
 /// Intercepts command output streams, parses progress, and filters out noise
 fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> {
     let start_time = Instant::now();
+    let mut total_fetches = 0;
+    let mut current_fetches = 0;
 
     // 1. Start with a spinner during the evaluation phase
     let pb = ProgressBar::new_spinner();
@@ -22,7 +24,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
             .template("{spinner:.green} [{elapsed_precise}] {msg}")
             .unwrap()
     );
-    pb.set_message("Evaluating configuration...");
+    pb.set_message("Evaluating configurationLayout...");
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     cmd.stdout(Stdio::piped());
@@ -33,9 +35,11 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
+            let trimmed = line.trim();
+
             // Filter out common Nix/CMake build noise and ugly evaluation warnings
             if line.contains("%]")   
-                || line.contains("Built target")   
+                || line.contains("Built target")    
                 || line.contains("Install the project...")
                 || line.contains("-- Install configuration:")
                 || line.contains("separating debug info")
@@ -51,13 +55,12 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 || line.contains("warning: 'system' has been renamed")
                 || line.contains("warning: using or as an identifier is deprecated")
                 || line.contains("warning: Ignoring setting")
-                || line.trim().starts_with("at /nix/store/")
+                || trimmed.starts_with("at /nix/store/")
             {
                 continue;  
             }
 
             // Filter out Nix's multi-line code snippets (e.g. " 121| " or " 184|")
-            let trimmed = line.trim();
             if trimmed.contains('|') && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('|')) {
                 continue;
             }
@@ -67,42 +70,91 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;
             }
 
-            // 2. DYNAMIC PROGRESS BAR: Catch "these X derivations will be built:"
+            // 2a. DYNAMIC PROGRESS BAR FOR FETCHES: Intercept path download lists
+            if line.contains("paths will be fetched") {
+                if let Some(count_str) = line.split_whitespace().find(|s| s.parse::<u64>().is_ok()) {
+                    if let Ok(total) = count_str.parse::<u64>() {
+                        total_fetches = total;
+                        current_fetches = 0;
+                        pb.set_length(total);
+                        pb.set_position(0);
+                        pb.set_style(
+                            ProgressStyle::default_bar()
+                                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.magenta/blue}] {pos}/{len} ({eta}) {msg}")
+                                .unwrap()
+                                .progress_chars("=> ")
+                        );
+                        pb.set_message("Fetching system paths...");
+                    }
+                }
+                continue;
+            }
+
+            // 2b. Compress individual raw fetch paths into single-line status updates
+            if trimmed.starts_with("/nix/store/") && !trimmed.ends_with(".drv") {
+                current_fetches += 1;
+                if total_fetches > 0 {
+                    pb.set_position(current_fetches);
+                }
+                if let Some(name_part) = trimmed.strip_prefix("/nix/store/") {
+                    let clean_name = if name_part.len() > 33 && name_part.as_bytes()[32] == b'-' {
+                        &name_part[33..]
+                    } else {
+                        name_part
+                    };
+                    pb.set_message(format!("Fetching {}...", clean_name));
+                }
+                continue;
+            }
+
+            // 2c. DYNAMIC PROGRESS BAR FOR BUILDS: Catch "these X derivations will be built:"
             if line.contains("these ") && line.contains(" derivations will be built:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     if let Ok(total) = parts[1].parse::<u64>() {
                         pb.set_length(total);
+                        pb.set_position(0);
                         pb.set_style(
                             ProgressStyle::default_bar()
                                 .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta}) {msg}")
                                 .unwrap()
                                 .progress_chars("=> ")
                         );
-                        pb.set_message("Building...");
+                        pb.set_message("Building dependencies...");
                     }
                 }
-                continue; // Skip printing this literal line
+                continue;
             }
 
             // 3. Increment the bar for every package being built
             if line.starts_with("building '/nix/store/") {
                 pb.inc(1);
                 
-                // Extract a cleaner package name for the UI string
                 if let Some(drv) = line.split('-').nth(1) {
                     let name = drv.trim_end_matches(".drv'...").trim_end_matches(".drv'");
                     pb.set_message(format!("Building {}...", name));
                 }
-                continue; // Skip printing the raw build log
-            }
-
-            // Skip any empty lines left over by the aggressive filtering above
-            if line.trim().is_empty() {
                 continue;
             }
 
-            // Print everything else cleanly ABOVE the progress bar so it doesn't break the UI
+            // 4. SQUASH BUILD PHASES: Intercept builder-specific steps (e.g. "xplr> Run phase:...")
+            if let Some(idx) = trimmed.find('>') {
+                let prefix = &trimmed[..idx];
+                if !prefix.is_empty() && prefix.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                    let log_msg = trimmed[idx + 1..].trim();
+                    if !log_msg.is_empty() {
+                        pb.set_message(format!("{}: {}", prefix, log_msg));
+                    }
+                    continue; // Divert from printing to screen, keeping terminal pristine
+                }
+            }
+
+            // Skip any empty lines left over by the aggressive filtering above
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // Print critical alerts and genuine compiler errors safely ABOVE the progress bar
             pb.println(&line);
         }
     }
@@ -114,7 +166,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
 
     if status.success() {
         // Cargo-style completion message
-        println!("   \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s", start_time.elapsed().as_secs_f64());
+        println!("    \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s", start_time.elapsed().as_secs_f64());
         Ok(())
     } else {
         Err(RixError::ParseError(error_msg.to_string()))
@@ -138,7 +190,7 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
         c.env("NIX_CONFIG", "experimental-features = nix-command flakes");
         let action = if dry_run { "dry-build" } else { "switch" };
         c.args([
-            "nixos-rebuild", action,   
+            "nixos-rebuild", action,    
             "--flake", &format!("{}#system", config_str)
         ]);
         c
@@ -146,7 +198,7 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
         let mut c = Command::new("nix");
         c.env("NIX_CONFIG", "experimental-features = nix-command flakes");
         c.args([
-            "run", "nixpkgs#home-manager", "--",   
+            "run", "nixpkgs#home-manager", "--",    
             "switch", "--flake", &config_str
         ]);
         if dry_run {
