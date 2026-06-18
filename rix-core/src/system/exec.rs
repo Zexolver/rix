@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
@@ -15,6 +16,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
     let start_time = Instant::now();
     let mut total_fetches = 0;
     let mut current_fetches = 0;
+    let mut seen_messages = HashSet::new();
 
     // 1. Start with a spinner during the evaluation phase
     let pb = ProgressBar::new_spinner();
@@ -181,6 +183,14 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
 
             if trimmed.is_empty() {
                 continue;
+            }
+
+            // 5. DEDUPLICATE WARNINGS
+            if trimmed.starts_with("warning:") {
+                // If we have already seen this exact warning string, skip printing it again
+                if !seen_messages.insert(trimmed.to_string()) {
+                    continue; 
+                }
             }
 
             pb.println(&line);
