@@ -56,8 +56,9 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;  
             }
 
-            // Filter out Nix's multi-line code snippets (e.g. " 121| " or "    |   ^ ")
-            if line.contains("| ") && (line.trim().starts_with(|c: char| c.is_ascii_digit()) || line.trim().starts_with('|')) {
+            // Filter out Nix's multi-line code snippets (e.g. " 121| " or " 184|")
+            let trimmed = line.trim();
+            if trimmed.contains('|') && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('|')) {
                 continue;
             }
 

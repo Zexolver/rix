@@ -4,6 +4,17 @@ use crate::errors::RixError;
 use crate::{parser, writer, Package};
 use rnix::SyntaxKind;
 
+/// Helper to parse the raw alias name out of an external flake hack string
+fn extract_alias(s: &str) -> Option<&str> {
+    if let Some(idx) = s.find("__ext_flake or (") {
+        let rest = &s[idx + "__ext_flake or (".len()..];
+        if let Some(dot) = rest.find('.') {
+            return Some(&rest[..dot]);
+        }
+    }
+    None
+}
+
 pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String>) -> Result<(), RixError> {
     let file_path = upstream_dir.join(format!("{}.nix", package.group));
     
@@ -18,8 +29,27 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
 
     // Check if package exists using the parser
     let packages = parser::extract_packages_from_list(&list_node);
-    if packages.iter().any(|(name, _)| name == &package.name) {
-        return Ok(());   
+    
+    // Armored interception: Convert standard single-point resolution into a bulletproof fallback chain
+    let mut pkg_name = package.name.clone();
+    if pkg_name.contains("__ext_flake or (") {
+        if let Some(start_idx) = pkg_name.find("__ext_flake or (") {
+            let inner = &pkg_name[start_idx + "__ext_flake or (".len()..];
+            if let Some(dot_idx) = inner.find(".packages.") {
+                let alias = &inner[..dot_idx];
+                pkg_name = format!(
+                    "__ext_flake or ({0}.packages.${{pkgs.system}}.default or {0}.defaultPackage.${{pkgs.system}} or {0}.packages.${{pkgs.system}}.{0})",
+                    alias
+                );
+            }
+        }
+    }
+
+    if packages.iter().any(|(name, _)| {
+        name == &pkg_name || 
+        (extract_alias(name).is_some() && extract_alias(name) == extract_alias(&pkg_name))
+    }) {
+        return Ok(());    
     }
 
     let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
@@ -28,10 +58,10 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
     let formatted_pkg = if wrapper.is_some() {
         format!(
             "  (pkgs.symlinkJoin {{ name = \"{0}-rix-wrap\"; paths = [ pkgs.{0} ]; postBuild = ''\n    if [ -d $out/bin ]; then\n      for bin in $out/bin/*; do\n        filename=$(basename \"$bin\")\n        rm \"$bin\"\n        echo \"#!/bin/sh\" > \"$bin\"\n        echo \"exec ${{pkgs.nixgl.${{import ../../hardware-state.nix}}}}/bin/${{import ../../hardware-state.nix}} ${{pkgs.{0}}}/bin/$filename \\\"\\$@\\\"\" >> \"$bin\"\n        chmod +x \"$bin\"\n      done\n    fi\n  ''; }}) # {1}\n",
-            package.name, description
+            pkg_name, description
         )
     } else {
-        format!("  pkgs.{} # {}\n", package.name, description)
+        format!("  pkgs.{} # {}\n", pkg_name, description)
     };
 
     // TEXT RANGE SURGERY: Find the exact byte coordinate of the closing bracket ']'
@@ -79,7 +109,16 @@ pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<S
             text.strip_prefix("pkgs.").unwrap_or(&text).to_string()
         };
 
-        if pkg_name == name {
+        // Smart removal match: Safely maps simple names ("xplr") or full URLs back to our armored expressions
+        let is_match = if pkg_name == name {
+            true
+        } else if let Some(alias) = extract_alias(&pkg_name) {
+            alias == name || extract_alias(name) == Some(alias)
+        } else {
+            false
+        };
+
+        if is_match {
             let mut start_idx: usize = child.text_range().start().into();
             let mut end_idx: usize = child.text_range().end().into();
 
