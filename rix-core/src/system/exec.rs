@@ -24,7 +24,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
             .template("{spinner:.green} [{elapsed_precise}] {msg}")
             .unwrap()
     );
-    pb.set_message("Evaluating configurationLayout...");
+    pb.set_message("Evaluating configuration...");
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     cmd.stdout(Stdio::piped());
@@ -37,8 +37,18 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
         for line in reader.lines().flatten() {
             let trimmed = line.trim();
 
-            // Filter out common Nix/CMake build noise and ugly evaluation warnings
-            if line.contains("%]")   
+            // 2a. Intercept lock file updates
+            if line.contains("warning: updating lock file") {
+                pb.set_message("Updating flake.lock inputs...");
+                continue;
+            }
+
+            // Filter out lockfile changelog lines and common Nix noise
+            if trimmed.starts_with('•') 
+                || trimmed.starts_with("'github:") 
+                || trimmed.starts_with("follows ")
+                || trimmed.starts_with("'git+file:")
+                || line.contains("%]")   
                 || line.contains("Built target")    
                 || line.contains("Install the project...")
                 || line.contains("-- Install configuration:")
@@ -60,17 +70,17 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;  
             }
 
-            // Filter out Nix's multi-line code snippets (e.g. " 121| " or " 184|")
+            // Filter out Nix's multi-line code snippets
             if trimmed.contains('|') && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('|')) {
                 continue;
             }
 
-            // Hide the raw derivation path spam since the progress bar covers it
+            // Hide the raw derivation path spam
             if line.starts_with("  /nix/store/") && line.ends_with(".drv") {
                 continue;
             }
 
-            // 2a. DYNAMIC PROGRESS BAR FOR FETCHES: Intercept path download lists
+            // 2b. DYNAMIC PROGRESS BAR FOR FETCHES: Intercept path download lists
             if line.contains("paths will be fetched") {
                 if let Some(count_str) = line.split_whitespace().find(|s| s.parse::<u64>().is_ok()) {
                     if let Ok(total) = count_str.parse::<u64>() {
@@ -90,7 +100,27 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;
             }
 
-            // 2b. Compress individual raw fetch paths into single-line status updates
+            // 2c. Intercept active copying/downloading from caches
+            if line.starts_with("copying path '/nix/store/") {
+                current_fetches += 1;
+                if total_fetches > 0 {
+                    pb.set_position(current_fetches);
+                }
+                if let Some(path_part) = line.strip_prefix("copying path '/nix/store/") {
+                    if let Some(end_idx) = path_part.find('\'') {
+                        let full_name = &path_part[..end_idx];
+                        let clean_name = if full_name.len() > 33 && full_name.as_bytes()[32] == b'-' {
+                            &full_name[33..]
+                        } else {
+                            full_name
+                        };
+                        pb.set_message(format!("Downloading {}...", clean_name));
+                    }
+                }
+                continue;
+            }
+
+            // Compress individual raw fetch paths into single-line status updates
             if trimmed.starts_with("/nix/store/") && !trimmed.ends_with(".drv") {
                 current_fetches += 1;
                 if total_fetches > 0 {
@@ -107,7 +137,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;
             }
 
-            // 2c. DYNAMIC PROGRESS BAR FOR BUILDS: Catch "these X derivations will be built:"
+            // 3a. DYNAMIC PROGRESS BAR FOR BUILDS
             if line.contains("these ") && line.contains(" derivations will be built:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
@@ -126,7 +156,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;
             }
 
-            // 3. Increment the bar for every package being built
+            // 3b. Increment the bar for every package being built
             if line.starts_with("building '/nix/store/") {
                 pb.inc(1);
                 
@@ -137,7 +167,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 continue;
             }
 
-            // 4. SQUASH BUILD PHASES: Intercept builder-specific steps (e.g. "xplr> Run phase:...")
+            // 4. SQUASH BUILD PHASES: Intercept builder-specific steps
             if let Some(idx) = trimmed.find('>') {
                 let prefix = &trimmed[..idx];
                 if !prefix.is_empty() && prefix.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
@@ -145,27 +175,23 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                     if !log_msg.is_empty() {
                         pb.set_message(format!("{}: {}", prefix, log_msg));
                     }
-                    continue; // Divert from printing to screen, keeping terminal pristine
+                    continue; 
                 }
             }
 
-            // Skip any empty lines left over by the aggressive filtering above
             if trimmed.is_empty() {
                 continue;
             }
 
-            // Print critical alerts and genuine compiler errors safely ABOVE the progress bar
             pb.println(&line);
         }
     }
 
     let status = child.wait().map_err(|_| RixError::ParseError(error_msg.to_string()))?;
     
-    // Erase the progress bar from the terminal once finished
     pb.finish_and_clear();
 
     if status.success() {
-        // Cargo-style completion message
         println!("    \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s", start_time.elapsed().as_secs_f64());
         Ok(())
     } else {
@@ -210,13 +236,12 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
     run_quiet_command(cmd, "Failed to materialize declarative generation updates")
 }
 
-/// Bridges Nix binaries into standard system paths so `sudo` can find them
 pub fn bridge_system_binaries() -> Result<(), RixError> {
     let source_bin_dir = Path::new("/nix/var/nix/profiles/default/bin");
     let target_bin_dir = Path::new("/usr/local/bin");
 
     if !source_bin_dir.exists() {
-        return Ok(()); // Nothing to bridge
+        return Ok(()); 
     }
 
     for entry in fs::read_dir(source_bin_dir).map_err(|e| RixError::ParseError(e.to_string()))? {
@@ -226,12 +251,10 @@ pub fn bridge_system_binaries() -> Result<(), RixError> {
         if let Some(file_name) = source_path.file_name() {
             let target_path = target_bin_dir.join(file_name);
 
-            // Clean up old symlinks if they exist
             if target_path.exists() || target_path.is_symlink() {
                 let _ = fs::remove_file(&target_path);  
             }
 
-            // Create the new symlink
             symlink(&source_path, &target_path).map_err(|e| {
                 RixError::ParseError(format!("Failed to bridge binary {:?}: {}", file_name, e))
             })?;
