@@ -36,9 +36,18 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
         }
     }
 
+    // Helper to enforce the Rix identity on the local repository
+    let apply_local_identity = |repo: &Repository| {
+        if let Ok(mut config) = repo.config() {
+            let _ = config.set_str("user.name", "Rix System Manager");
+            let _ = config.set_str("user.email", "rix@localhost");
+        }
+    };
+
     if target_dir.join(".git").exists() {
         // Ensure if it's a legacy repo on 'master', we gracefully migrate it to 'main'
         if let Ok(repo) = Repository::open(target_dir) {
+            apply_local_identity(&repo); // Ensure existing repos get the identity too
             if let Ok(mut master_branch) = repo.find_branch("master", git2::BranchType::Local) {
                 if repo.find_branch("main", git2::BranchType::Local).is_err() {
                     let _ = master_branch.rename("main", false);
@@ -49,6 +58,7 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     }
 
     let repo = Repository::init(target_dir)?;
+    apply_local_identity(&repo);
     
     // Force the default branch to be 'main' instead of 'master'
     repo.set_head("refs/heads/main")?;
@@ -61,7 +71,7 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     let tree = repo.find_tree(tree_id)?;
 
     let sig = repo.signature().unwrap_or_else(|_| {
-        Signature::now("Rix Provisioner", "rix@local").unwrap()
+        Signature::now("Rix System Manager", "rix@localhost").unwrap()
     });
 
     repo.commit(
@@ -87,7 +97,7 @@ pub fn commit_state(target_dir: &Path, message: &str) -> Result<(), RixError> {
     let tree = repo.find_tree(tree_id)?;
 
     let head = repo.head()?.peel_to_commit()?;
-    let sig = repo.signature().unwrap_or_else(|_| Signature::now("Rix System", "rix@local").unwrap());
+    let sig = repo.signature().unwrap_or_else(|_| Signature::now("Rix System Manager", "rix@localhost").unwrap());
 
     repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])?;
     Ok(())
@@ -123,6 +133,12 @@ mod tests {
         assert!(repo_path.join(".git").exists(), ".git directory missing");
 
         let repo = git2::Repository::open(repo_path).expect("Could not open repo");
+        
+        // Verify identity was set
+        let config = repo.config().expect("Could not get repo config");
+        assert_eq!(config.get_string("user.name").unwrap(), "Rix System Manager");
+        assert_eq!(config.get_string("user.email").unwrap(), "rix@localhost");
+
         let mut revwalk = repo.revwalk().expect("Could not create revwalk");
         revwalk.push_head().expect("Could not push HEAD");
         
