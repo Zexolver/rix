@@ -37,10 +37,22 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     }
 
     if target_dir.join(".git").exists() {
+        // Ensure if it's a legacy repo on 'master', we gracefully migrate it to 'main'
+        if let Ok(repo) = Repository::open(target_dir) {
+            if let Ok(mut master_branch) = repo.find_branch("master", git2::BranchType::Local) {
+                if repo.find_branch("main", git2::BranchType::Local).is_err() {
+                    let _ = master_branch.rename("main", false);
+                }
+            }
+        }
         return Ok(());
     }
 
     let repo = Repository::init(target_dir)?;
+    
+    // Force the default branch to be 'main' instead of 'master'
+    repo.set_head("refs/heads/main")?;
+
     let mut index = repo.index()?;
     index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
     index.write()?;
@@ -53,12 +65,12 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     });
 
     repo.commit(
-        Some("HEAD"),  
-        &sig,          
-        &sig,          
+        Some("HEAD"),   
+        &sig,           
+        &sig,           
         "chore: initialize Rix environment state",
         &tree,
-        &[],           
+        &[],            
     )?;
 
     Ok(())
@@ -115,5 +127,6 @@ mod tests {
         revwalk.push_head().expect("Could not push HEAD");
         
         assert_eq!(revwalk.count(), 1, "Expected exactly 1 commit in history");
+        assert!(repo.find_branch("main", git2::BranchType::Local).is_ok(), "Branch should be 'main'");
     }
 }
