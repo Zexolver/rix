@@ -11,6 +11,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use crate::errors::RixError;
 use super::platform::{detect_target_platform, TargetPlatform};
 
+const RIX_NIX_CONFIG: &str = "experimental-features = nix-command flakes\nextra-substituters = https://nix-community.cachix.org\nextra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=";
+
 /// Intercepts command output streams, parses progress, and filters out noise
 fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> {
     let start_time = Instant::now();
@@ -211,7 +213,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
 
 pub fn update_indexes() -> Result<(), RixError> {
     let mut cmd = Command::new("nix");
-    cmd.env("NIX_CONFIG", "experimental-features = nix-command flakes")
+    cmd.env("NIX_CONFIG", RIX_NIX_CONFIG)
        .args(["flake", "update"]);
         
     run_quiet_command(cmd, "Failed to update Flake lock references")
@@ -223,7 +225,7 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
 
     let cmd = if is_system && platform == TargetPlatform::NixOS {
         let mut c = Command::new("sudo");
-        c.env("NIX_CONFIG", "experimental-features = nix-command flakes");
+        c.env("NIX_CONFIG", RIX_NIX_CONFIG);
         let action = if dry_run { "dry-build" } else { "switch" };
         c.args([
             "nixos-rebuild", action,    
@@ -232,7 +234,7 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
         c
     } else {
         let mut c = Command::new("nix");
-        c.env("NIX_CONFIG", "experimental-features = nix-command flakes");
+        c.env("NIX_CONFIG", RIX_NIX_CONFIG);
         c.args([
             "run", "nixpkgs#home-manager", "--",    
             "switch", "--flake", &config_str
