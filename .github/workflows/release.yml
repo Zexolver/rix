@@ -23,7 +23,7 @@ jobs:
         run: cargo build --release
 
       - name: Rename binary for clarity (Optional)
-        run: mv target/release/rix target/release/rix-x86_64-linux
+        run: mv target/release/rix-cli target/release/rix-x86_64-linux
 
       - name: Create Release and Upload Binary
         uses: softprops/action-gh-release@v2
