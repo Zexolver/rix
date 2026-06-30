@@ -63,7 +63,7 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
             println!("🌐 Detected external flake URI for '{}'. Normalizing...", name);
             
             let uri = parser::normalize_flake_uri(&name);
-            let alias = parser::infer_flake_alias(&uri);   
+            let alias = parser::infer_flake_alias(&uri);    
             
             println!("💉 Injecting flake input '{}' into flake.nix...", alias);
             if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
@@ -96,11 +96,11 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
                 // Drop the spinner completely before modifying state files or prompting for sudo
                 spinner.finish_and_clear();
                 
-                handlers::execute_add(ctx, Package {   
-                    name: verified_name,   
+                handlers::execute_add(ctx, Package {    
+                    name: verified_name,    
                     description: description.clone(),   
                     group: group.clone(),   
-                    is_local_recipe: false   
+                    is_local_recipe: false  
                 });
                 
                 needs_upgrade = true;
@@ -130,33 +130,41 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
     }
 }
 
-pub fn handle_search(_ctx: &RixContext, query: String) {
-    let spinner = ui::create_spinner("Querying modern Flake registry...");
+pub fn handle_search(ctx: &RixContext, query: String) {
+    let spinner = ui::create_spinner("Searching local package database...");
     
-    match rix_core::verify::run_nix_search(&query) {
+    // Call the new highly optimized SQLite binding in rix-core
+    match rix_core::verify::search_local_db(&ctx.config_dir, &query) {
         Ok(results) => {
             spinner.finish_and_clear();
             if results.is_empty() {
                 println!("No packages matched your query.");
             } else {
-                println!("\n{:<40} {}", "PACKAGE ATTRIBUTE PATH", "DESCRIPTION");
-                println!("{}", "-".repeat(80));
+                println!("\n{:<35} {:<20} {}", "PACKAGE ATTRIBUTE PATH", "VERSION", "DESCRIPTION");
+                println!("{}", "-".repeat(100));
                 
-                // UI FIX: Only display the top 15 results
                 let display_limit = 15;
-                for (path, desc) in results.iter().take(display_limit) {
+                for (path, version, desc) in results.iter().take(display_limit) {
                     let short_path = path.splitn(3, '.').nth(2).unwrap_or(path);
                     
-                    // UTF-8 SAFE TRUNCATION: Avoid byte-slicing panics if descriptions contain multi-byte characters
-                    let clean_desc = if desc.len() > 60 {
-                        let mut truncated = desc.chars().take(57).collect::<String>();
+                    // UTF-8 SAFE TRUNCATION
+                    let clean_desc = if desc.len() > 40 {
+                        let mut truncated = desc.chars().take(37).collect::<String>();
                         truncated.push_str("...");
                         truncated
                     } else {
                         desc.to_string()
                     };
                     
-                    println!("{:<40} {}", short_path, clean_desc);
+                    let clean_version = if version.len() > 18 {
+                        let mut truncated = version.chars().take(15).collect::<String>();
+                        truncated.push_str("...");
+                        truncated
+                    } else {
+                        version.to_string()
+                    };
+                    
+                    println!("{:<35} {:<20} {}", short_path, clean_version, clean_desc);
                 }
                 
                 if results.len() > display_limit {
@@ -167,7 +175,7 @@ pub fn handle_search(_ctx: &RixContext, query: String) {
         }
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("Search sequence broken: {:?}", e);
+            eprintln!("Database search failed: {:?}", e);
             std::process::exit(1);
         }
     }

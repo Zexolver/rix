@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::path::Path;
 use crate::errors::RixError;
 
 pub fn verify_online_package_architecture(package_name: &str) -> Result<String, RixError> {
@@ -80,6 +81,51 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
             std::cmp::Ordering::Greater
         } else {
             // If both are exact or neither are exact, the shorter path wins (banishing deep nesting)
+            a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0))
+        }
+    });
+
+    Ok(results)
+}
+
+pub fn search_local_db(config_dir: &Path, query: &str) -> Result<Vec<(String, String, String)>, RixError> {
+    let db_path = config_dir.join("pkgs.db");
+    
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path, 
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+    ).map_err(|e| RixError::ParseError(format!("Failed to open local database: {}", e)))?;
+
+    // Try to pull description if it exists; SQLite coalesces missing fields gracefully
+    let sql = "SELECT name, version, COALESCE(description, '') FROM packages WHERE name LIKE ? LIMIT 50";
+    let mut stmt = conn.prepare(sql).map_err(|e| RixError::ParseError(format!("Failed to prepare query: {}", e)))?;
+    
+    let query_param = format!("%{}%", query);
+    let pkg_iter = stmt.query_map([&query_param], |row| {
+        let name: String = row.get(0)?;
+        let version: String = row.get(1).unwrap_or_else(|_| "unknown".to_string());
+        let desc: String = row.get(2).unwrap_or_else(|_| "".to_string());
+        Ok((name, version, desc))
+    }).map_err(|e| RixError::ParseError(format!("Query failed: {}", e)))?;
+
+    let mut results = Vec::new();
+    for pkg in pkg_iter {
+        if let Ok(p) = pkg {
+            results.push(p);
+        }
+    }
+
+    // Apply the exact same smart sorting logic to your SQLite results
+    let query_lower = query.to_lowercase();
+    results.sort_by(|a, b| {
+        let a_exact = a.0.to_lowercase() == query_lower;
+        let b_exact = b.0.to_lowercase() == query_lower;
+
+        if a_exact && !b_exact {
+            std::cmp::Ordering::Less
+        } else if b_exact && !a_exact {
+            std::cmp::Ordering::Greater
+        } else {
             a.0.len().cmp(&b.0.len()).then_with(|| a.0.cmp(&b.0))
         }
     });

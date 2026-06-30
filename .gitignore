@@ -1,3 +1,4 @@
 target/
 sandbox/
 install-nix.sh
+packages.json
