@@ -5,8 +5,10 @@ use crate::writer;
 
 pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
+    
+    // Self-healing: Bootstrap the flake if it doesn't exist
     if !flake_path.exists() {
-        return Ok(());  
+        writer::write_content_to_file(&flake_path, &writer::get_bootstrap_flake_template())?;
     }
 
     let content = fs::read_to_string(&flake_path)?;
@@ -43,17 +45,16 @@ pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixErro
 
 pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str, group: &str) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
+    
+    // Self-healing: Bootstrap the flake instead of erroring out
     if !flake_path.exists() {
-        return Err(RixError::IOError(std::io::Error::new(
-            std::io::ErrorKind::NotFound, 
-            "flake.nix not found in config directory"
-        )));
+        writer::write_content_to_file(&flake_path, &writer::get_bootstrap_flake_template())?;
     }
 
     let mut content = fs::read_to_string(&flake_path)?;
 
     // 1. Inject the Input Attribute
-    let input_str = format!("    {}.url = \"{}\";\n  ", alias, uri);
+    let input_str = format!("   {}.url = \"{}\";\n  ", alias, uri);
     if !content.contains(&format!("{}.url", alias)) {
         if let Some(inputs_end_idx) = content.find("  };\n\n  outputs = {") {
             content.insert_str(inputs_end_idx, &input_str);

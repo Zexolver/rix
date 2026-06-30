@@ -10,6 +10,9 @@ reqwest = { version = "0.13.3", features = ["blocking", "json"] }
 rnix = "0.11"
 rowan = "0.15"
 serde_json = "1.0.149"
+brotli = "3.4"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.10.0"
