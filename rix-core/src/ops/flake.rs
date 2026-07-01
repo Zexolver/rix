@@ -1,11 +1,11 @@
-use std::fs;
-use std::path::Path;
 use crate::errors::RixError;
 use crate::writer;
+use std::fs;
+use std::path::Path;
 
 pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
-    
+
     // Self-healing: Bootstrap the flake if it doesn't exist
     if !flake_path.exists() {
         writer::write_content_to_file(&flake_path, &writer::get_bootstrap_flake_template())?;
@@ -18,7 +18,10 @@ pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixErro
         return Ok(());
     }
 
-    let module_inject = format!("        {{ home.packages = {} {{ inherit pkgs; }}; }}", import_statement);
+    let module_inject = format!(
+        "        {{ home.packages = {} {{ inherit pkgs; }}; }}",
+        import_statement
+    );
 
     let mut new_content = String::new();
     let mut injected = false;
@@ -36,16 +39,21 @@ pub fn link_group_to_flake(config_dir: &Path, group: &str) -> Result<(), RixErro
 
     if !injected {
         return Err(RixError::ParseError(
-            "Could not find 'modules = [' array in flake.nix to auto-link group".into()
+            "Could not find 'modules = [' array in flake.nix to auto-link group".into(),
         ));
     }
 
     writer::write_content_to_file(&flake_path, &new_content)
 }
 
-pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str, group: &str) -> Result<(), RixError> {
+pub fn add_external_input(
+    config_dir: &Path,
+    alias: &str,
+    uri: &str,
+    group: &str,
+) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
-    
+
     // Self-healing: Bootstrap the flake instead of erroring out
     if !flake_path.exists() {
         writer::write_content_to_file(&flake_path, &writer::get_bootstrap_flake_template())?;
@@ -59,7 +67,9 @@ pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str, group: &str
         if let Some(inputs_end_idx) = content.find("  };\n\n  outputs = {") {
             content.insert_str(inputs_end_idx, &input_str);
         } else {
-            return Err(RixError::ParseError("Could not locate inputs block closure in flake.nix".into()));
+            return Err(RixError::ParseError(
+                "Could not locate inputs block closure in flake.nix".into(),
+            ));
         }
     }
 
@@ -69,7 +79,9 @@ pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str, group: &str
         if let Some(outputs_idx) = content.find("... }:") {
             content.insert_str(outputs_idx, &output_param);
         } else {
-            return Err(RixError::ParseError("Could not locate outputs parameter list in flake.nix".into()));
+            return Err(RixError::ParseError(
+                "Could not locate outputs parameter list in flake.nix".into(),
+            ));
         }
     }
 
@@ -89,7 +101,10 @@ pub fn add_external_input(config_dir: &Path, alias: &str, uri: &str, group: &str
         let mut group_content = fs::read_to_string(&group_path)?;
         let target_header = "{ pkgs";
         // Prevent duplicate injections
-        if group_content.contains(target_header) && !group_content.contains(&format!("{},", alias)) && !group_content.contains(&format!("{} ", alias)) {
+        if group_content.contains(target_header)
+            && !group_content.contains(&format!("{},", alias))
+            && !group_content.contains(&format!("{} ", alias))
+        {
             group_content = group_content.replace(target_header, &format!("{{ pkgs, {}", alias));
             writer::write_content_to_file(&group_path, &group_content)?;
         }

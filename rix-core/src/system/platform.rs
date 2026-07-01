@@ -12,8 +12,8 @@ pub enum NixInstallType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TargetPlatform {
     NixOS,
-    MultiUserLinux,  
-    SingleUserLinux, 
+    MultiUserLinux,
+    SingleUserLinux,
     MacOS,
 }
 

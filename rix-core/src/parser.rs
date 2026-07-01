@@ -18,14 +18,14 @@ pub fn find_list_node(node: &SyntaxNode) -> Option<SyntaxNode> {
 /// Helper to parse messy wrapper nodes back into clean package names
 pub fn clean_package_name(raw_text: &str) -> String {
     let text = raw_text.trim();
-    
+
     // Catch old script wrappers
     if text.starts_with("(pkgs.writeShellScriptBin") {
         let parts: Vec<&str> = text.split('"').collect();
         if parts.len() >= 3 {
             return parts[1].to_string();
         }
-    } 
+    }
     // Catch new symlinkJoin wrappers
     else if text.starts_with("(pkgs.symlinkJoin") {
         if let Some(start) = text.find("paths = [ pkgs.") {
@@ -34,7 +34,7 @@ pub fn clean_package_name(raw_text: &str) -> String {
             return rest[..end].to_string();
         }
     }
-    
+
     // Fallback for standard packages, preserving naked identifiers
     text.strip_prefix("pkgs.").unwrap_or(text).to_string()
 }
@@ -42,15 +42,15 @@ pub fn clean_package_name(raw_text: &str) -> String {
 /// Safely crawl the list AST node, extracting package names and inline comments
 pub fn extract_packages_from_list(list_node: &SyntaxNode) -> Vec<(String, String)> {
     let mut items = Vec::new();
-    
+
     // list_node.children() only evaluates actual element sub-nodes.
     // Every node present inside the list brackets represents an explicit package entry.
     for child in list_node.children() {
         let text = child.text().to_string();
-        
+
         // Use our new smart parser to rip the actual package name out of the AST text
         let pkg_name = clean_package_name(&text);
-        
+
         let mut current_sibling = child.next_sibling_or_token();
         let mut found_comment = String::from("Managed via Rix");
 
@@ -89,7 +89,7 @@ pub fn parse_root_node(content: &str) -> Result<SyntaxNode, String> {
 /// Normalizes raw HTTPS URLs into standard Nix Flake URIs
 pub fn normalize_flake_uri(input: &str) -> String {
     let input = input.trim();
-    
+
     if let Some(stripped) = input.strip_prefix("https://github.com/") {
         let parts: Vec<&str> = stripped.trim_end_matches('/').split('/').collect();
         if parts.len() >= 2 {
@@ -101,7 +101,7 @@ pub fn normalize_flake_uri(input: &str) -> String {
             return format!("gitlab:{}/{}", parts[0], parts[1]);
         }
     }
-    
+
     // If it's already a valid flake URI (github:...) or local path, return as is
     input.to_string()
 }
@@ -110,10 +110,10 @@ pub fn normalize_flake_uri(input: &str) -> String {
 pub fn infer_flake_alias(uri: &str) -> String {
     // Split by '/' (for paths or repos) or ':' (for flake schemas)
     let last_segment = uri.split(&['/', ':'][..]).last().unwrap_or(uri);
-    
+
     // Strip common suffixes that make for ugly variable names
     let cleaned = last_segment.trim_end_matches(".git");
-    
+
     if cleaned.is_empty() {
         "custom-flake".to_string()
     } else {

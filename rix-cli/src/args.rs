@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "rix", version, about = "A fast, automated Nix environment optimizer")]
+#[command(
+    name = "rix",
+    version,
+    about = "A fast, automated Nix environment optimizer"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

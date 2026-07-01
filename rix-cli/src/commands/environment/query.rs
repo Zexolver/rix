@@ -1,9 +1,9 @@
+use super::elevate_privileges;
+use crate::commands::package::format_package_name;
+use crate::ui;
 use rix_core::RixContext;
 use std::process::Command;
 use std::time::Instant;
-use crate::ui;
-use crate::commands::package::format_package_name;
-use super::elevate_privileges;
 
 pub fn handle_list(ctx: &RixContext) {
     match ctx.list_all_packages() {
@@ -15,9 +15,9 @@ pub fn handle_list(ctx: &RixContext) {
 
             ui::print_package_table(polished_packages);
         }
-        Err(e) => {   
-            eprintln!("Failed to retrieve packages: {:?}", e);   
-            std::process::exit(1);   
+        Err(e) => {
+            eprintln!("Failed to retrieve packages: {:?}", e);
+            std::process::exit(1);
         }
     }
 }
@@ -38,7 +38,8 @@ pub fn handle_history(ctx: &RixContext) {
         "log",
         "--pretty=format:%h|%ad|%s",
         "--date=format:%Y-%m-%d %H:%M",
-        "-n", "20" // Limit to recent 20 commits for speed and readability
+        "-n",
+        "20", // Limit to recent 20 commits for speed and readability
     ]);
 
     match cmd.output() {
@@ -48,9 +49,12 @@ pub fn handle_history(ctx: &RixContext) {
 
             if output.status.success() {
                 let stdout_str = String::from_utf8_lossy(&output.stdout);
-                
-                println!("⏳ Declarative Environment History [finished in {:.2}s]\n", duration.as_secs_f64());
-                
+
+                println!(
+                    "⏳ Declarative Environment History [finished in {:.2}s]\n",
+                    duration.as_secs_f64()
+                );
+
                 let lines: Vec<&str> = stdout_str.lines().collect();
                 if lines.is_empty() {
                     println!("No environment history found. Try installing a package!");
@@ -84,7 +88,11 @@ pub fn handle_history(ctx: &RixContext) {
                 if stderr_str.contains("not a git repository") {
                     println!("No Git history initialized yet. Try running 'rix init'.");
                 } else {
-                    eprintln!("❌ Failed to read git history state after {:.2}s:\n{}", duration.as_secs_f64(), stderr_str);
+                    eprintln!(
+                        "❌ Failed to read git history state after {:.2}s:\n{}",
+                        duration.as_secs_f64(),
+                        stderr_str
+                    );
                 }
             }
         }

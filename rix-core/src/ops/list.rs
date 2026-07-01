@@ -1,8 +1,8 @@
+use crate::errors::RixError;
+use crate::{Package, parser, writer};
+use rnix::SyntaxKind;
 use std::fs;
 use std::path::Path;
-use crate::errors::RixError;
-use crate::{parser, writer, Package};
-use rnix::SyntaxKind;
 
 /// Helper to parse the raw alias name out of an external flake hack string
 fn extract_alias(s: &str) -> Option<&str> {
@@ -15,21 +15,26 @@ fn extract_alias(s: &str) -> Option<&str> {
     None
 }
 
-pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String>) -> Result<(), RixError> {
+pub fn add_package(
+    upstream_dir: &Path,
+    package: Package,
+    wrapper: Option<String>,
+) -> Result<(), RixError> {
     let file_path = upstream_dir.join(format!("{}.nix", package.group));
-    
+
     if !file_path.exists() {
         fs::write(&file_path, writer::get_empty_group_template())?;
     }
-    
+
     let mut content = fs::read_to_string(&file_path)?;
     let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
-    let list_node = parser::find_list_node(&root_node)
-        .ok_or_else(|| RixError::ParseError("No list block [ ... ] found in target file".to_string()))?;
+    let list_node = parser::find_list_node(&root_node).ok_or_else(|| {
+        RixError::ParseError("No list block [ ... ] found in target file".to_string())
+    })?;
 
     // Check if package exists using the parser
     let packages = parser::extract_packages_from_list(&list_node);
-    
+
     // Armored interception: Convert standard single-point resolution into a bulletproof fallback chain
     let mut pkg_name = package.name.clone();
     if pkg_name.contains("__ext_flake or (") {
@@ -46,14 +51,16 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
     }
 
     if packages.iter().any(|(name, _)| {
-        name == &pkg_name || 
-        (extract_alias(name).is_some() && extract_alias(name) == extract_alias(&pkg_name))
+        name == &pkg_name
+            || (extract_alias(name).is_some() && extract_alias(name) == extract_alias(&pkg_name))
     }) {
-        return Ok(());    
+        return Ok(());
     }
 
-    let description = package.description.unwrap_or_else(|| "Installed via Rix".to_string());
-    
+    let description = package
+        .description
+        .unwrap_or_else(|| "Installed via Rix".to_string());
+
     // DYNAMIC HARDWARE FIX: Wraps EVERY binary inside $out/bin instead of just {0}
     let formatted_pkg = if wrapper.is_some() {
         format!(
@@ -65,9 +72,10 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
     };
 
     // TEXT RANGE SURGERY: Find the exact byte coordinate of the closing bracket ']'
-    let last_token = list_node.last_token()
+    let last_token = list_node
+        .last_token()
         .ok_or_else(|| RixError::ParseError("Could not find closing bracket of list".into()))?;
-          
+
     let insert_index: usize = last_token.text_range().start().into();
 
     // Inject the string exactly before the closing bracket
@@ -77,7 +85,11 @@ pub fn add_package(upstream_dir: &Path, package: Package, wrapper: Option<String
     writer::write_content_to_file(&file_path, &content)
 }
 
-pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<String>) -> Result<(), RixError> {
+pub fn remove_package_from_file(
+    name: &str,
+    file_path: &Path,
+    _wrapper: Option<String>,
+) -> Result<(), RixError> {
     let mut content = fs::read_to_string(file_path)?;
     let root_node = parser::parse_root_node(&content).map_err(RixError::ParseError)?;
     let list_node = parser::find_list_node(&root_node)
@@ -87,7 +99,7 @@ pub fn remove_package_from_file(name: &str, file_path: &Path, _wrapper: Option<S
 
     for child in list_node.children() {
         let text = child.text().to_string().trim().to_string();
-        
+
         // Smart matching: Support normal packages, old script wrappers, and new symlinkJoin wrappers
         let pkg_name = if text.starts_with("(pkgs.writeShellScriptBin") {
             let parts: Vec<&str> = text.split('"').collect();

@@ -2,17 +2,17 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
+use brotli::Decompressor;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::get;
-use brotli::Decompressor;
 use rusqlite::Connection;
 
+use super::platform::{TargetPlatform, detect_target_platform};
 use crate::errors::RixError;
-use super::platform::{detect_target_platform, TargetPlatform};
 
 const RIX_NIX_CONFIG: &str = "experimental-features = nix-command flakes\nextra-substituters = https://nix-community.cachix.org\nextra-trusted-public-keys = nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs=";
 
@@ -29,7 +29,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
         ProgressStyle::default_spinner()
             .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
             .template("{spinner:.green} [{elapsed_precise}] {msg}")
-            .unwrap()
+            .unwrap(),
     );
     pb.set_message("Evaluating configuration...");
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -37,8 +37,10 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|_| RixError::ParseError(error_msg.to_string()))?;
-     
+    let mut child = cmd
+        .spawn()
+        .map_err(|_| RixError::ParseError(error_msg.to_string()))?;
+
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
         for line in reader.lines().flatten() {
@@ -51,12 +53,12 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
             }
 
             // Filter out lockfile changelog lines and common Nix noise
-            if trimmed.starts_with('•')  
-                || trimmed.starts_with("'github:")  
+            if trimmed.starts_with('•')
+                || trimmed.starts_with("'github:")
                 || trimmed.starts_with("follows ")
                 || trimmed.starts_with("'git+file:")
-                || line.contains("%]")   
-                || line.contains("Built target")    
+                || line.contains("%]")
+                || line.contains("Built target")
                 || line.contains("Install the project...")
                 || line.contains("-- Install configuration:")
                 || line.contains("separating debug info")
@@ -74,11 +76,13 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 || line.contains("warning: Ignoring setting")
                 || trimmed.starts_with("at /nix/store/")
             {
-                continue;   
+                continue;
             }
 
             // Filter out Nix's multi-line code snippets
-            if trimmed.contains('|') && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('|')) {
+            if trimmed.contains('|')
+                && (trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('|'))
+            {
                 continue;
             }
 
@@ -89,7 +93,8 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
 
             // 2b. DYNAMIC PROGRESS BAR FOR FETCHES
             if line.contains("paths will be fetched") {
-                if let Some(count_str) = line.split_whitespace().find(|s| s.parse::<u64>().is_ok()) {
+                if let Some(count_str) = line.split_whitespace().find(|s| s.parse::<u64>().is_ok())
+                {
                     if let Ok(total) = count_str.parse::<u64>() {
                         total_fetches = total;
                         current_fetches = 0;
@@ -116,7 +121,8 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
                 if let Some(path_part) = line.strip_prefix("copying path '/nix/store/") {
                     if let Some(end_idx) = path_part.find('\'') {
                         let full_name = &path_part[..end_idx];
-                        let clean_name = if full_name.len() > 33 && full_name.as_bytes()[32] == b'-' {
+                        let clean_name = if full_name.len() > 33 && full_name.as_bytes()[32] == b'-'
+                        {
                             &full_name[33..]
                         } else {
                             full_name
@@ -166,7 +172,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
             // 3b. Increment the bar for every package being built
             if line.starts_with("building '/nix/store/") {
                 pb.inc(1);
-                 
+
                 if let Some(drv) = line.split('-').nth(1) {
                     let name = drv.trim_end_matches(".drv'...").trim_end_matches(".drv'");
                     pb.set_message(format!("Building {}...", name));
@@ -177,12 +183,16 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
             // 4. SQUASH BUILD PHASES
             if let Some(idx) = trimmed.find('>') {
                 let prefix = &trimmed[..idx];
-                if !prefix.is_empty() && prefix.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                if !prefix.is_empty()
+                    && prefix
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                {
                     let log_msg = trimmed[idx + 1..].trim();
                     if !log_msg.is_empty() {
                         pb.set_message(format!("{}: {}", prefix, log_msg));
                     }
-                    continue;  
+                    continue;
                 }
             }
 
@@ -193,7 +203,7 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
             // 5. DEDUPLICATE WARNINGS
             if trimmed.starts_with("warning:") {
                 if !seen_messages.insert(trimmed.to_string()) {
-                    continue;  
+                    continue;
                 }
             }
 
@@ -201,24 +211,29 @@ fn run_quiet_command(mut cmd: Command, error_msg: &str) -> Result<(), RixError> 
         }
     }
 
-    let status = child.wait().map_err(|_| RixError::ParseError(error_msg.to_string()))?;
-     
+    let status = child
+        .wait()
+        .map_err(|_| RixError::ParseError(error_msg.to_string()))?;
+
     pb.finish_and_clear();
 
     if status.success() {
-        println!("    \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s", start_time.elapsed().as_secs_f64());
+        println!(
+            "    \x1b[1;32mFinished\x1b[0m environment generation in {:.2}s",
+            start_time.elapsed().as_secs_f64()
+        );
         Ok(())
     } else {
         Err(RixError::ParseError(error_msg.to_string()))
     }
 }
 
-pub fn update_indexes(config_dir: &Path) -> Result<(), RixError> {
+pub fn update_indexes(config_dir: &Path, is_system: bool) -> Result<(), RixError> {
     // 1. Update the flake.lock file so package versions increment correctly
     let mut cmd = Command::new("nix");
     cmd.env("NIX_CONFIG", RIX_NIX_CONFIG)
-       .args(["flake", "update"]);
-        
+        .args(["flake", "update"]);
+
     run_quiet_command(cmd, "Failed to update Flake lock references")?;
 
     // 2. Fetch and decode stream straight into memory structures
@@ -227,7 +242,7 @@ pub fn update_indexes(config_dir: &Path) -> Result<(), RixError> {
         ProgressStyle::default_spinner()
             .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
             .template("{spinner:.cyan} {msg}")
-            .unwrap()
+            .unwrap(),
     );
     pb.set_message("Fetching and indexing NixOS channels (this may take a moment)...");
     pb.enable_steady_tick(std::time::Duration::from_millis(80));
@@ -259,40 +274,76 @@ pub fn update_indexes(config_dir: &Path) -> Result<(), RixError> {
 
     pb.set_message("Optimizing index into SQLite format...");
 
+    // Resolve compliant system-wide or user XDG cache directory
+    let cache_dir = if is_system {
+        PathBuf::from("/var/cache/rix")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".cache/rix")
+    } else {
+        config_dir.to_path_buf()
+    };
+
+    // Ensure target cache storage layout exists before attempting connection
+    fs::create_dir_all(&cache_dir).map_err(|e| {
+        RixError::ParseError(format!(
+            "Failed to create database cache directory structure: {}",
+            e
+        ))
+    })?;
+
     // 3. Dump the slimmed down packages into SQLite
-    let db_path = config_dir.join("pkgs.db");
+    let db_path = cache_dir.join("pkgs.db");
     let mut conn = Connection::open(&db_path)
         .map_err(|e| RixError::ParseError(format!("Failed to initialize db: {}", e)))?;
 
-    let tx = conn.transaction().map_err(|e| RixError::ParseError(e.to_string()))?;
-    tx.execute("CREATE TABLE IF NOT EXISTS packages (name TEXT, version TEXT, description TEXT)", [])
+    let tx = conn
+        .transaction()
         .map_err(|e| RixError::ParseError(e.to_string()))?;
-    
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS packages (name TEXT, version TEXT, description TEXT)",
+        [],
+    )
+    .map_err(|e| RixError::ParseError(e.to_string()))?;
+
     // Clear out old data
-    tx.execute("DELETE FROM packages", []).map_err(|e| RixError::ParseError(e.to_string()))?;
+    tx.execute("DELETE FROM packages", [])
+        .map_err(|e| RixError::ParseError(e.to_string()))?;
 
     {
-        let mut stmt = tx.prepare("INSERT INTO packages (name, version, description) VALUES (?1, ?2, ?3)")
+        let mut stmt = tx
+            .prepare("INSERT INTO packages (name, version, description) VALUES (?1, ?2, ?3)")
             .map_err(|e| RixError::ParseError(e.to_string()))?;
 
         for (key, pkg) in dump.packages {
             let name = pkg.pname.or(pkg.name).unwrap_or(key);
             let version = pkg.version.unwrap_or_default();
             let desc = pkg.meta.and_then(|m| m.description).unwrap_or_default();
-            
+
             let _ = stmt.execute([name, version, desc]);
         }
     }
-    
-    tx.commit().map_err(|e| RixError::ParseError(e.to_string()))?;
 
-    // 4. Cleanup old bloated JSON files if they exist
-    let old_json = config_dir.join("packages.json");
+    tx.commit()
+        .map_err(|e| RixError::ParseError(e.to_string()))?;
+
+    // 4. Housekeeping: Erase any legacy files in configuration tracks or modern caches
+    let old_json = cache_dir.join("packages.json");
     if old_json.exists() {
         let _ = fs::remove_file(old_json);
     }
+    let legacy_json = config_dir.join("packages.json");
+    if legacy_json.exists() {
+        let _ = fs::remove_file(legacy_json);
+    }
+    let legacy_db = config_dir.join("pkgs.db");
+    if legacy_db.exists() {
+        let _ = fs::remove_file(legacy_db);
+    }
 
-    pb.finish_with_message(format!("✅ Lightning-fast database compiled at {:?}", db_path));
+    pb.finish_with_message(format!(
+        "✅ Lightning-fast database compiled at {:?}",
+        db_path
+    ));
     Ok(())
 }
 
@@ -305,16 +356,22 @@ pub fn apply_upgrade(config_path: &Path, is_system: bool, dry_run: bool) -> Resu
         c.env("NIX_CONFIG", RIX_NIX_CONFIG);
         let action = if dry_run { "dry-build" } else { "switch" };
         c.args([
-            "nixos-rebuild", action,    
-            "--flake", &format!("{}#system", config_str)
+            "nixos-rebuild",
+            action,
+            "--flake",
+            &format!("{}#system", config_str),
         ]);
         c
     } else {
         let mut c = Command::new("nix");
         c.env("NIX_CONFIG", RIX_NIX_CONFIG);
         c.args([
-            "run", "nixpkgs#home-manager", "--",    
-            "switch", "--flake", &config_str
+            "run",
+            "nixpkgs#home-manager",
+            "--",
+            "switch",
+            "--flake",
+            &config_str,
         ]);
         if dry_run {
             c.arg("-n");
@@ -330,18 +387,18 @@ pub fn bridge_system_binaries() -> Result<(), RixError> {
     let target_bin_dir = Path::new("/usr/local/bin");
 
     if !source_bin_dir.exists() {
-        return Ok(());  
+        return Ok(());
     }
 
     for entry in fs::read_dir(source_bin_dir).map_err(|e| RixError::ParseError(e.to_string()))? {
         let entry = entry.map_err(|e| RixError::ParseError(e.to_string()))?;
         let source_path = entry.path();
-         
+
         if let Some(file_name) = source_path.file_name() {
             let target_path = target_bin_dir.join(file_name);
 
             if target_path.exists() || target_path.is_symlink() {
-                let _ = fs::remove_file(&target_path);   
+                let _ = fs::remove_file(&target_path);
             }
 
             symlink(&source_path, &target_path).map_err(|e| {
@@ -349,6 +406,6 @@ pub fn bridge_system_binaries() -> Result<(), RixError> {
             })?;
         }
     }
-     
+
     Ok(())
 }

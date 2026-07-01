@@ -1,7 +1,7 @@
+use crate::errors::RixError;
+use crate::parser;
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::parser;
-use crate::errors::RixError;
 
 pub struct FoundPackage {
     pub name: String,
@@ -9,7 +9,10 @@ pub struct FoundPackage {
 }
 
 /// Dynamic lookups. Returns a list of packages matching full string, prefix, or inner contents.
-pub fn find_packages_in_upstream(upstream_dir: &Path, query: &str) -> Result<Vec<FoundPackage>, RixError> {
+pub fn find_packages_in_upstream(
+    upstream_dir: &Path,
+    query: &str,
+) -> Result<Vec<FoundPackage>, RixError> {
     let mut matches = Vec::new();
     let query_lower = query.to_lowercase();
 
@@ -21,9 +24,11 @@ pub fn find_packages_in_upstream(upstream_dir: &Path, query: &str) -> Result<Vec
                 if let Ok(root) = parser::parse_root_node(&content) {
                     if let Some(list) = parser::find_list_node(&root) {
                         for (full_pkg_name, _) in parser::extract_packages_from_list(&list) {
-                            let clean_name = full_pkg_name.strip_prefix("pkgs.").unwrap_or(&full_pkg_name);
-                            
-                            // FIX: Use .contains() instead of .starts_with() to penetrate 
+                            let clean_name = full_pkg_name
+                                .strip_prefix("pkgs.")
+                                .unwrap_or(&full_pkg_name);
+
+                            // FIX: Use .contains() instead of .starts_with() to penetrate
                             // complex AST strings like __ext_flake or if/then/else conditionals.
                             if clean_name.to_lowercase().contains(&query_lower) {
                                 matches.push(FoundPackage {
@@ -48,12 +53,19 @@ pub fn list_all_packages(upstream_dir: &Path) -> Result<Vec<(String, String, Str
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "nix") {
-                let group_name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                let group_name = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 let content = fs::read_to_string(&path)?;
                 if let Ok(root) = parser::parse_root_node(&content) {
                     if let Some(list) = parser::find_list_node(&root) {
                         for (full_pkg, comment) in parser::extract_packages_from_list(&list) {
-                            let clean_name = full_pkg.strip_prefix("pkgs.").unwrap_or(&full_pkg).to_string();
+                            let clean_name = full_pkg
+                                .strip_prefix("pkgs.")
+                                .unwrap_or(&full_pkg)
+                                .to_string();
                             all_packages.push((clean_name, group_name.clone(), comment));
                         }
                     }

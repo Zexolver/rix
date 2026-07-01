@@ -7,7 +7,7 @@ pub enum RixError {
     MissingSystemDependency(String),
     InvalidNixSyntax(String),
     // Add the new Git error variant
-    GitError(git2::Error), 
+    GitError(git2::Error),
 }
 
 impl fmt::Display for RixError {
@@ -15,7 +15,9 @@ impl fmt::Display for RixError {
         match self {
             RixError::IOError(err) => write!(f, "I/O Error: {}", err),
             RixError::ParseError(msg) => write!(f, "Parse Error: {}", msg),
-            RixError::MissingSystemDependency(msg) => write!(f, "Missing System Dependency: {}", msg),
+            RixError::MissingSystemDependency(msg) => {
+                write!(f, "Missing System Dependency: {}", msg)
+            }
             RixError::InvalidNixSyntax(msg) => write!(f, "Invalid Nix Syntax: {}", msg),
             // Add display mapping for Git errors
             RixError::GitError(err) => write!(f, "Git Repository Error: {}", err),

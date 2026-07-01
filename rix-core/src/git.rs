@@ -1,11 +1,11 @@
-use git2::{Repository, IndexAddOption, Signature, Config, ResetType};
-use std::path::Path;
-use std::env;
 use crate::errors::RixError;
+use git2::{Config, IndexAddOption, Repository, ResetType, Signature};
+use std::env;
+use std::path::Path;
 
 pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     let path_str = target_dir.to_string_lossy();
-    
+
     let apply_safe_dir = |mut config: Config| {
         let mut already_safe = false;
         if let Ok(mut entries) = config.entries(Some("safe.directory")) {
@@ -59,7 +59,7 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
 
     let repo = Repository::init(target_dir)?;
     apply_local_identity(&repo);
-    
+
     // Force the default branch to be 'main' instead of 'master'
     repo.set_head("refs/heads/main")?;
 
@@ -70,17 +70,17 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
 
-    let sig = repo.signature().unwrap_or_else(|_| {
-        Signature::now("Rix System Manager", "rix@localhost").unwrap()
-    });
+    let sig = repo
+        .signature()
+        .unwrap_or_else(|_| Signature::now("Rix System Manager", "rix@localhost").unwrap());
 
     repo.commit(
-        Some("HEAD"),   
-        &sig,           
-        &sig,           
+        Some("HEAD"),
+        &sig,
+        &sig,
         "chore: initialize Rix environment state",
         &tree,
-        &[],            
+        &[],
     )?;
 
     Ok(())
@@ -90,14 +90,16 @@ pub fn initialize_state_repo(target_dir: &Path) -> Result<(), RixError> {
 pub fn commit_state(target_dir: &Path, message: &str) -> Result<(), RixError> {
     let repo = Repository::open(target_dir)?;
     let mut index = repo.index()?;
-    
+
     index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
     index.write()?;
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
 
     let head = repo.head()?.peel_to_commit()?;
-    let sig = repo.signature().unwrap_or_else(|_| Signature::now("Rix System Manager", "rix@localhost").unwrap());
+    let sig = repo
+        .signature()
+        .unwrap_or_else(|_| Signature::now("Rix System Manager", "rix@localhost").unwrap());
 
     repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])?;
     Ok(())
@@ -106,10 +108,10 @@ pub fn commit_state(target_dir: &Path, message: &str) -> Result<(), RixError> {
 /// Hard resets the configuration directory, wiping away broken modifications
 pub fn rollback_to_head(target_dir: &Path) -> Result<(), RixError> {
     let repo = Repository::open(target_dir)?;
-    
+
     // Peel down to the commit, then reference it as a generic Object for the reset
     let head_commit = repo.head()?.peel_to_commit()?;
-    
+
     // Hard reset wipes working directory and index back to the last commit
     repo.reset(head_commit.as_object(), ResetType::Hard, None)?;
     Ok(())
@@ -118,8 +120,8 @@ pub fn rollback_to_head(target_dir: &Path) -> Result<(), RixError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_git_repo_initialization() {
@@ -133,16 +135,22 @@ mod tests {
         assert!(repo_path.join(".git").exists(), ".git directory missing");
 
         let repo = git2::Repository::open(repo_path).expect("Could not open repo");
-        
+
         // Verify identity was set
         let config = repo.config().expect("Could not get repo config");
-        assert_eq!(config.get_string("user.name").unwrap(), "Rix System Manager");
+        assert_eq!(
+            config.get_string("user.name").unwrap(),
+            "Rix System Manager"
+        );
         assert_eq!(config.get_string("user.email").unwrap(), "rix@localhost");
 
         let mut revwalk = repo.revwalk().expect("Could not create revwalk");
         revwalk.push_head().expect("Could not push HEAD");
-        
+
         assert_eq!(revwalk.count(), 1, "Expected exactly 1 commit in history");
-        assert!(repo.find_branch("main", git2::BranchType::Local).is_ok(), "Branch should be 'main'");
+        assert!(
+            repo.find_branch("main", git2::BranchType::Local).is_ok(),
+            "Branch should be 'main'"
+        );
     }
 }

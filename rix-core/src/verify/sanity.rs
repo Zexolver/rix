@@ -1,5 +1,5 @@
-use std::process::Command;
 use crate::errors::RixError;
+use std::process::Command;
 
 pub fn check_system_sanity() -> Result<(), RixError> {
     let status = Command::new("which")
@@ -7,10 +7,11 @@ pub fn check_system_sanity() -> Result<(), RixError> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
-    
+
     if !matches!(status, Ok(s) if s.success()) {
         return Err(RixError::MissingSystemDependency(
-            "Critical dependency 'nix' not found on system PATH. Ensure modern Nix is installed.".to_string()
+            "Critical dependency 'nix' not found on system PATH. Ensure modern Nix is installed."
+                .to_string(),
         ));
     }
     Ok(())
@@ -25,10 +26,10 @@ pub fn verify_flake_resolves(uri: &str) -> Result<(), RixError> {
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
         return Err(RixError::InvalidNixSyntax(format!(
-            "Flake validation failed. The target '{}' may not be a valid Nix flake.\n{}", 
+            "Flake validation failed. The target '{}' may not be a valid Nix flake.\n{}",
             uri, err_msg
         )));
     }
-    
+
     Ok(())
 }

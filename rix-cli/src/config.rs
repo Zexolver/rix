@@ -19,7 +19,7 @@ pub fn get_config_dir() -> PathBuf {
 
     // 3. Read the default scope from rix.toml
     let mut default_is_system = false;
-    
+
     if let Ok(content) = fs::read_to_string(&toml_path) {
         // Basic text parsing to avoid bringing in heavy TOML dependencies for one key
         for line in content.lines() {
@@ -31,8 +31,8 @@ pub fn get_config_dir() -> PathBuf {
         }
     } else {
         // Fallback: If no config exists, guess based on execution privileges
-        default_is_system = env::var("USER").unwrap_or_default() == "root"  
-            || env::var("SUDO_USER").is_ok();
+        default_is_system =
+            env::var("USER").unwrap_or_default() == "root" || env::var("SUDO_USER").is_ok();
     }
 
     // 4. Route to the appropriate standard directory layout

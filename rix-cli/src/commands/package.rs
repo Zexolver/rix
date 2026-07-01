@@ -1,11 +1,11 @@
-use rix_core::{Package, RixContext};
-use rix_core::parser;
-use rix_core::ops::flake;
-use regex::Regex;
-use std::sync::OnceLock;
+use crate::commands::environment::elevate_privileges;
 use crate::handlers;
 use crate::ui;
-use crate::commands::environment::elevate_privileges;
+use regex::Regex;
+use rix_core::ops::flake;
+use rix_core::parser;
+use rix_core::{Package, RixContext};
+use std::sync::OnceLock;
 
 /// Formats raw Nix AST strings into human-readable package names for the UI table.
 pub fn format_package_name(raw_name: &str) -> String {
@@ -22,12 +22,15 @@ pub fn format_package_name(raw_name: &str) -> String {
     // 2. Conditional expressions: if pkgs.stdenv.isLinux then pkgs.foo else pkgs.bar (or null)
     static COND_RE: OnceLock<Regex> = OnceLock::new();
     let cond_re = COND_RE.get_or_init(|| {
-        Regex::new(r"if\s+pkgs\.stdenv\.isLinux\s+then\s+pkgs\.([^\s]+)\s+else\s+(pkgs\.([^\s]+)|null)").unwrap()
+        Regex::new(
+            r"if\s+pkgs\.stdenv\.isLinux\s+then\s+pkgs\.([^\s]+)\s+else\s+(pkgs\.([^\s]+)|null)",
+        )
+        .unwrap()
     });
     if let Some(caps) = cond_re.captures(clean_raw) {
         let linux_pkg = caps.get(1).unwrap().as_str();
         let else_match = caps.get(2).unwrap().as_str();
-        
+
         if else_match == "null" {
             return format!("{} (Linux only)", linux_pkg);
         } else if let Some(other_pkg) = caps.get(3) {
@@ -50,7 +53,12 @@ pub fn format_package_name(raw_name: &str) -> String {
     clean_raw.to_string()
 }
 
-pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, description: Option<String>) {
+pub fn handle_install(
+    ctx: &RixContext,
+    packages: Vec<String>,
+    group: String,
+    description: Option<String>,
+) {
     if ctx.is_system && unsafe { libc::geteuid() != 0 } {
         elevate_privileges();
     }
@@ -60,54 +68,70 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
     for name in &packages {
         // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
         if name.starts_with("http://") || name.starts_with("https://") || name.contains(':') {
-            println!("🌐 Detected external flake URI for '{}'. Normalizing...", name);
-            
+            println!(
+                "🌐 Detected external flake URI for '{}'. Normalizing...",
+                name
+            );
+
             let uri = parser::normalize_flake_uri(&name);
-            let alias = parser::infer_flake_alias(&uri);    
-            
+            let alias = parser::infer_flake_alias(&uri);
+
             println!("💉 Injecting flake input '{}' into flake.nix...", alias);
             if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
                 eprintln!("Failed to inject flake input: {:?}", e);
                 std::process::exit(1);
             }
-            
+
             // Wrap in parentheses to bypass the writer's auto-prefixing, and safely quote the architecture interpolation
-            let pkg_expr = format!("__ext_flake or ({}.packages.${{pkgs.system}}.default)", alias);
-            let desc = description.clone().unwrap_or_else(|| format!("External flake: {}", uri));
-            
+            let pkg_expr = format!(
+                "__ext_flake or ({}.packages.${{pkgs.system}}.default)",
+                alias
+            );
+            let desc = description
+                .clone()
+                .unwrap_or_else(|| format!("External flake: {}", uri));
+
             println!("📦 Adding package output to environment...");
-            handlers::execute_add(ctx, Package {
-                name: pkg_expr,
-                group: group.clone(),
-                description: Some(desc),
-                is_local_recipe: false,
-            });
-            
+            handlers::execute_add(
+                ctx,
+                Package {
+                    name: pkg_expr,
+                    group: group.clone(),
+                    description: Some(desc),
+                    is_local_recipe: false,
+                },
+            );
+
             needs_upgrade = true;
             continue;
         }
 
         // Coerce the runtime String into a &'static str so the spinner can safely hold it
-        let message = Box::leak(format!("Querying upstream package indices for '{}'...", name).into_boxed_str());
+        let message = Box::leak(
+            format!("Querying upstream package indices for '{}'...", name).into_boxed_str(),
+        );
         let spinner = ui::create_spinner(message);
-        
+
         match rix_core::verify::verify_online_package_architecture(&name) {
             Ok(verified_name) => {
                 // Drop the spinner completely before modifying state files or prompting for sudo
                 spinner.finish_and_clear();
-                
-                handlers::execute_add(ctx, Package {    
-                    name: verified_name,    
-                    description: description.clone(),   
-                    group: group.clone(),   
-                    is_local_recipe: false  
-                });
-                
+
+                handlers::execute_add(
+                    ctx,
+                    Package {
+                        name: verified_name,
+                        description: description.clone(),
+                        group: group.clone(),
+                        is_local_recipe: false,
+                    },
+                );
+
                 needs_upgrade = true;
             }
             Err(e) => {
                 spinner.finish_and_clear();
-                eprintln!("{:?}", e);   
+                eprintln!("{:?}", e);
                 std::process::exit(1);
             }
         }
@@ -120,7 +144,7 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
             eprintln!("Failed to apply target updates to environment: {:?}", e);
         } else {
             println!("✅ Successfully updated environment generation!");
-            
+
             // Auto-commit the successfully installed packages
             let commit_msg = format!("rix: installed {}", packages.join(", "));
             if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
@@ -132,7 +156,7 @@ pub fn handle_install(ctx: &RixContext, packages: Vec<String>, group: String, de
 
 pub fn handle_search(ctx: &RixContext, query: String) {
     let spinner = ui::create_spinner("Searching local package database...");
-    
+
     // Call the new highly optimized SQLite binding in rix-core
     match rix_core::verify::search_local_db(&ctx.config_dir, &query) {
         Ok(results) => {
@@ -140,13 +164,16 @@ pub fn handle_search(ctx: &RixContext, query: String) {
             if results.is_empty() {
                 println!("No packages matched your query.");
             } else {
-                println!("\n{:<35} {:<20} {}", "PACKAGE ATTRIBUTE PATH", "VERSION", "DESCRIPTION");
+                println!(
+                    "\n{:<35} {:<20} {}",
+                    "PACKAGE ATTRIBUTE PATH", "VERSION", "DESCRIPTION"
+                );
                 println!("{}", "-".repeat(100));
-                
+
                 let display_limit = 15;
                 for (path, version, desc) in results.iter().take(display_limit) {
                     let short_path = path.splitn(3, '.').nth(2).unwrap_or(path);
-                    
+
                     // UTF-8 SAFE TRUNCATION
                     let clean_desc = if desc.len() > 40 {
                         let mut truncated = desc.chars().take(37).collect::<String>();
@@ -155,7 +182,7 @@ pub fn handle_search(ctx: &RixContext, query: String) {
                     } else {
                         desc.to_string()
                     };
-                    
+
                     let clean_version = if version.len() > 18 {
                         let mut truncated = version.chars().take(15).collect::<String>();
                         truncated.push_str("...");
@@ -163,12 +190,16 @@ pub fn handle_search(ctx: &RixContext, query: String) {
                     } else {
                         version.to_string()
                     };
-                    
+
                     println!("{:<35} {:<20} {}", short_path, clean_version, clean_desc);
                 }
-                
+
                 if results.len() > display_limit {
-                    println!("\n... and {} more results hidden. (Showing top {})", results.len() - display_limit, display_limit);
+                    println!(
+                        "\n... and {} more results hidden. (Showing top {})",
+                        results.len() - display_limit,
+                        display_limit
+                    );
                 }
                 println!();
             }
@@ -189,7 +220,7 @@ pub fn handle_remove(ctx: &RixContext, packages: Vec<String>) {
     for name in &packages {
         handlers::handle_interactive_removal(ctx, name);
     }
-    
+
     // Auto-commit the successfully removed packages
     let commit_msg = format!("rix: removed {}", packages.join(", "));
     if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {

@@ -1,6 +1,6 @@
+use rix_core::{Package, RixContext, verify};
 use std::fs;
 use tempfile::TempDir;
-use rix_core::{Package, RixContext, verify};
 
 #[test]
 fn test_end_to_end_package_lifecycle() {
@@ -20,7 +20,7 @@ fn test_end_to_end_package_lifecycle() {
 
     let file_path = tmp_dir.path().join("groups/upstream/default.nix");
     assert!(file_path.exists());
-    
+
     // Ensure our syntax check treats the fresh file as totally healthy
     assert!(verify::verify_nix_syntax(&file_path).is_ok());
 
@@ -32,14 +32,18 @@ fn test_end_to_end_package_lifecycle() {
 fn test_syntax_checker_catches_malformed_nix() {
     let tmp_dir = TempDir::new().unwrap();
     let file_path = tmp_dir.path().join("broken.nix");
-    
+
     // Write broken, un-parseable trash text into the file
-    fs::write(&file_path, "this { is completely broken syntax structure ===").unwrap();
-    
+    fs::write(
+        &file_path,
+        "this { is completely broken syntax structure ===",
+    )
+    .unwrap();
+
     // Assert that our validation check detects it instead of letting it pass silently
     let check_result = verify::verify_nix_syntax(&file_path);
     assert!(check_result.is_err());
-    
+
     if let Err(rix_core::RixError::InvalidNixSyntax(msg)) = check_result {
         assert!(msg.contains("syntax error"));
     } else {

@@ -1,6 +1,6 @@
-use std::process::Command;
-use std::path::Path;
 use crate::errors::RixError;
+use std::path::Path;
+use std::process::Command;
 
 pub fn verify_nix_syntax(file_path: &Path) -> Result<(), RixError> {
     if !file_path.exists() {
@@ -17,9 +17,12 @@ pub fn verify_nix_syntax(file_path: &Path) -> Result<(), RixError> {
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             Err(RixError::InvalidNixSyntax(format!(
-                "Generated file failed syntax validation: {}", stderr.trim()
+                "Generated file failed syntax validation: {}",
+                stderr.trim()
             )))
         }
-        Err(_) => Err(RixError::ParseError("Could not execute syntax validator".to_string())),
+        Err(_) => Err(RixError::ParseError(
+            "Could not execute syntax validator".to_string(),
+        )),
     }
 }

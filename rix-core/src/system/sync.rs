@@ -1,8 +1,8 @@
+use crate::errors::RixError;
 use std::env;
 use std::io::{Error, ErrorKind};
 use std::path::Path;
 use std::process::Command;
-use crate::errors::RixError;
 
 pub fn init_local_repo(target_dir: &Path) -> Result<(), RixError> {
     crate::git::initialize_state_repo(target_dir)
@@ -19,20 +19,32 @@ pub fn sync_to_remote(target_dir: &Path, remote_url: Option<&str>) -> Result<(),
             .current_dir(target_dir)
             .args(["remote", "add", "origin", url])
             .output()
-            .map_err(|_| RixError::IOError(Error::new(ErrorKind::Other, "Failed to execute git remote add")))?;
+            .map_err(|_| {
+                RixError::IOError(Error::new(
+                    ErrorKind::Other,
+                    "Failed to execute git remote add",
+                ))
+            })?;
 
         if !add_status.status.success() {
             Command::new("git")
                 .current_dir(target_dir)
                 .args(["remote", "set-url", "origin", url])
                 .output()
-                .map_err(|_| RixError::IOError(Error::new(ErrorKind::Other, "Failed to execute git remote set-url")))?;
+                .map_err(|_| {
+                    RixError::IOError(Error::new(
+                        ErrorKind::Other,
+                        "Failed to execute git remote set-url",
+                    ))
+                })?;
         }
     }
 
     // 2. Prepare the push command
     let mut push_cmd = Command::new("git");
-    push_cmd.current_dir(target_dir).args(["push", "-u", "origin", "main"]);
+    push_cmd
+        .current_dir(target_dir)
+        .args(["push", "-u", "origin", "main"]);
 
     // --- OPTION D: Automate SSH Authentication ---
     // If running under sudo, dynamically inject the original user's SSH credentials
@@ -53,23 +65,32 @@ pub fn sync_to_remote(target_dir: &Path, remote_url: Option<&str>) -> Result<(),
             // Force this specific Git subprocess to use the user's key and accept new hosts
             push_cmd.env(
                 "GIT_SSH_COMMAND",
-                format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", key_path)
+                format!(
+                    "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+                    key_path
+                ),
             );
         }
     }
 
     // 3. Execute the push
-    let output = push_cmd
-        .output()
-        .map_err(|_| RixError::IOError(Error::new(ErrorKind::Other, "Failed to execute git push command")))?;
+    let output = push_cmd.output().map_err(|_| {
+        RixError::IOError(Error::new(
+            ErrorKind::Other,
+            "Failed to execute git push command",
+        ))
+    })?;
 
     // 4. Handle errors
     if !output.status.success() {
         let err_msg = String::from_utf8_lossy(&output.stderr);
-        return Err(RixError::IOError(Error::new(ErrorKind::Other, format!(
-            "Failed to sync with the remote repository. Ensure you have permissions and the remote is reachable.\nGit output: {}",
-            err_msg.trim()
-        ))));
+        return Err(RixError::IOError(Error::new(
+            ErrorKind::Other,
+            format!(
+                "Failed to sync with the remote repository. Ensure you have permissions and the remote is reachable.\nGit output: {}",
+                err_msg.trim()
+            ),
+        )));
     }
 
     Ok(())

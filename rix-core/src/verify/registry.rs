@@ -1,13 +1,13 @@
-use std::process::Command;
-use std::path::Path;
 use crate::errors::RixError;
+use std::path::Path;
+use std::process::Command;
 
 pub fn verify_online_package_architecture(package_name: &str) -> Result<String, RixError> {
     let matches = run_nix_search(package_name)?;
-    
+
     if matches.is_empty() {
         return Err(RixError::ParseError(format!(
-            "Package '{}' is not available in the nixpkgs flake for your architecture.",  
+            "Package '{}' is not available in the nixpkgs flake for your architecture.",
             package_name
         )));
     }
@@ -18,8 +18,10 @@ pub fn verify_online_package_architecture(package_name: &str) -> Result<String, 
         if parts.len() == 3 {
             let extracted_name = parts[2];
             let final_segment = extracted_name.split('.').last().unwrap_or(extracted_name);
-            
-            if final_segment == package_name || extracted_name.ends_with(&format!(".{}", package_name)) {
+
+            if final_segment == package_name
+                || extracted_name.ends_with(&format!(".{}", package_name))
+            {
                 return Ok(extracted_name.to_string());
             }
         }
@@ -37,11 +39,12 @@ pub fn verify_online_package_architecture(package_name: &str) -> Result<String, 
 pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
     let output = Command::new("nix")
         .args([
-            "--extra-experimental-features", "nix-command flakes",
-            "search",  
-            "nixpkgs",  
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "search",
+            "nixpkgs",
             query,
-            "--json"
+            "--json",
         ])
         .output()
         .map_err(|e| RixError::ParseError(format!("Failed to invoke modern Nix search: {}", e)))?;
@@ -49,7 +52,7 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(RixError::ParseError(format!(
-            "Nix search evaluation failed. (If this is a cold run, cache initialization is required): {}",  
+            "Nix search evaluation failed. (If this is a cold run, cache initialization is required): {}",
             stderr.trim()
         )));
     }
@@ -61,7 +64,10 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
     let mut results = Vec::new();
     if let Some(obj) = packages.as_object() {
         for (key, val) in obj {
-            let description = val["description"].as_str().unwrap_or("No description available.").to_string();
+            let description = val["description"]
+                .as_str()
+                .unwrap_or("No description available.")
+                .to_string();
             results.push((key.clone(), description));
         }
     }
@@ -88,25 +94,38 @@ pub fn run_nix_search(query: &str) -> Result<Vec<(String, String)>, RixError> {
     Ok(results)
 }
 
-pub fn search_local_db(config_dir: &Path, query: &str) -> Result<Vec<(String, String, String)>, RixError> {
-    let db_path = config_dir.join("pkgs.db");
-    
-    let conn = rusqlite::Connection::open_with_flags(
-        db_path, 
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-    ).map_err(|e| RixError::ParseError(format!("Failed to open local database: {}", e)))?;
+pub fn search_local_db(
+    _config_dir: &Path,
+    query: &str,
+) -> Result<Vec<(String, String, String)>, RixError> {
+    // XDG Standard: Point directly to the system cache directory
+    let db_path = Path::new("/var/cache/rix/pkgs.db");
+
+    let conn =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| {
+                RixError::ParseError(format!(
+                    "Failed to open local database at {:?}. Did you run 'rix update'?: {}",
+                    db_path, e
+                ))
+            })?;
 
     // Try to pull description if it exists; SQLite coalesces missing fields gracefully
-    let sql = "SELECT name, version, COALESCE(description, '') FROM packages WHERE name LIKE ? LIMIT 50";
-    let mut stmt = conn.prepare(sql).map_err(|e| RixError::ParseError(format!("Failed to prepare query: {}", e)))?;
-    
+    let sql =
+        "SELECT name, version, COALESCE(description, '') FROM packages WHERE name LIKE ? LIMIT 50";
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| RixError::ParseError(format!("Failed to prepare query: {}", e)))?;
+
     let query_param = format!("%{}%", query);
-    let pkg_iter = stmt.query_map([&query_param], |row| {
-        let name: String = row.get(0)?;
-        let version: String = row.get(1).unwrap_or_else(|_| "unknown".to_string());
-        let desc: String = row.get(2).unwrap_or_else(|_| "".to_string());
-        Ok((name, version, desc))
-    }).map_err(|e| RixError::ParseError(format!("Query failed: {}", e)))?;
+    let pkg_iter = stmt
+        .query_map([&query_param], |row| {
+            let name: String = row.get(0)?;
+            let version: String = row.get(1).unwrap_or_else(|_| "unknown".to_string());
+            let desc: String = row.get(2).unwrap_or_else(|_| "".to_string());
+            Ok((name, version, desc))
+        })
+        .map_err(|e| RixError::ParseError(format!("Query failed: {}", e)))?;
 
     let mut results = Vec::new();
     for pkg in pkg_iter {
