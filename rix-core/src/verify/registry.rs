@@ -1,5 +1,5 @@
 use crate::errors::RixError;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn verify_online_package_architecture(package_name: &str) -> Result<String, RixError> {
@@ -98,11 +98,20 @@ pub fn search_local_db(
     _config_dir: &Path,
     query: &str,
 ) -> Result<Vec<(String, String, String)>, RixError> {
-    // XDG Standard: Point directly to the system cache directory
-    let db_path = Path::new("/var/cache/rix/pkgs.db");
+    // XDG Standard: Fallback from system cache to user cache
+    let system_db = PathBuf::from("/var/cache/rix/pkgs.db");
+    let user_db = std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".cache/rix/pkgs.db"))
+        .unwrap_or_else(|_| PathBuf::from(".cache/rix/pkgs.db"));
+
+    let db_path = if system_db.exists() {
+        system_db
+    } else {
+        user_db
+    };
 
     let conn =
-        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| {
                 RixError::ParseError(format!(
                     "Failed to open local database at {:?}. Did you run 'rix update'?: {}",
