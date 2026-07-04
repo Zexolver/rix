@@ -57,9 +57,9 @@ pub fn write_nix_file(
         } else {
             if let Some(ref wrapper) = nixgl_wrapper {
                 format!(
-                    "  (pkgs.writeShellScriptBin \"{}\" ''exec ${{pkgs.nixgl.{}}}/bin/{} ${{pkgs.{}}}/bin/{}'')",
-                    name, wrapper, wrapper, name, name
-                )
+    "  (pkgs.writeShellScriptBin \"{}\" ''\n    exec ${{pkgs.nixgl.{}}}/bin/{} ${{pkgs.{}}}/bin/{}\n  '')",
+    name, wrapper, wrapper, name, name
+	)
             } else {
                 format!("  pkgs.{}", name)
             }
