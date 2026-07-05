@@ -124,6 +124,8 @@ pub fn get_bootstrap_flake_template() -> String {
             home.homeDirectory = "{}";
             home.stateVersion = "24.05";
             
+	    targets.genericLinux.enable = true; # <--- ADD THIS LINE
+
             home.packages = import ./groups/upstream/default.nix {{ inherit pkgs; }};
           }}
         ];
