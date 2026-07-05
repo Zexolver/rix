@@ -36,11 +36,11 @@ pub fn write_default_gitignore(config_dir: &Path) -> Result<(), RixError> {
 }
 
 /// Formats and serializes a collection of package tuples back into standard Nix list format.
-/// Injects the nixGL wrapper if a hardware lockfile specifies one.
+/// Git-safe: Does not inject hardware-specific wrappers directly into synced files.
 pub fn write_nix_file(
     file_path: &Path,
     packages: Vec<(String, String)>,
-    nixgl_wrapper: Option<String>,
+    _nixgl_wrapper: Option<String>,
 ) -> Result<(), RixError> {
     let mut content = String::from("{ pkgs, ... }:\n[\n");
 
@@ -52,17 +52,12 @@ pub fn write_nix_file(
             || name.starts_with("let ")
             || name.starts_with("with ");
 
+        // Cleaned up: No more hardcoded NixGL strings.
+        // It simply writes the raw package name or complex expression.
         let formatted_name = if is_complex_expr {
             name.to_string()
         } else {
-            if let Some(ref wrapper) = nixgl_wrapper {
-                format!(
-                    "  (pkgs.writeShellScriptBin \"{}\" ''exec ${{pkgs.nixgl.{}}}/bin/{} ${{pkgs.{}}}/bin/{}'')",
-                    name, wrapper, wrapper, name, name
-                )
-            } else {
-                format!("  pkgs.{}", name)
-            }
+            format!("  pkgs.{}", name)
         };
 
         if description.is_empty() {
@@ -109,9 +104,16 @@ pub fn get_bootstrap_flake_template() -> String {
   outputs = {{ self, nixpkgs, home-manager, nixgl, ... }}:
     let
       system = "{}";
+      
+      # Safely evaluate the local hardware overlay only if the file exists on this specific machine
+      hardwareLocalOverlay = if builtins.pathExists ./hardware.nix.local
+                             then import ./hardware.nix.local
+                             else (final: prev: {{}});
+                             
       pkgs = import nixpkgs {{
         inherit system;
-        overlays = [ nixgl.overlay ];
+        # Inject the generated hardware wrapper into the Nix package set
+        overlays = [ nixgl.overlay hardwareLocalOverlay ];
       }};
     in {{
       homeConfigurations."{}" = home-manager.lib.homeManagerConfiguration {{
