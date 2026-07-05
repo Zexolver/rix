@@ -62,11 +62,7 @@ pub fn add_external_input(
     let mut content = fs::read_to_string(&flake_path)?;
 
     // 1. Inject the Input Attribute
-    // 1. Inject the Input Attribute
-    let input_str = format!(
-        "   {}.url = \"{}\";\n    {}.inputs.nixpkgs.follows = \"nixpkgs\";\n  ",
-        alias, uri, alias
-    );
+    let input_str = format!("   {}.url = \"{}\";\n  ", alias, uri);
     if !content.contains(&format!("{}.url", alias)) {
         if let Some(inputs_end_idx) = content.find("  };\n\n  outputs = {") {
             content.insert_str(inputs_end_idx, &input_str);
