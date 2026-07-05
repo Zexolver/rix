@@ -54,15 +54,18 @@ pub fn add_external_input(
 ) -> Result<(), RixError> {
     let flake_path = config_dir.join("flake.nix");
 
-    // Self-healing: Bootstrap the flake instead of erroring out
     if !flake_path.exists() {
         writer::write_content_to_file(&flake_path, &writer::get_bootstrap_flake_template())?;
     }
 
     let mut content = fs::read_to_string(&flake_path)?;
 
-    // 1. Inject the Input Attribute
-    let input_str = format!("   {}.url = \"{}\";\n  ", alias, uri);
+    // 1. Inject the Input Attribute (Optimistically force follows for performance)
+    let input_str = format!(
+        "   {}.url = \"{}\";\n   {}.inputs.nixpkgs.follows = \"nixpkgs\";\n  ",
+        alias, uri, alias
+    );
+    
     if !content.contains(&format!("{}.url", alias)) {
         if let Some(inputs_end_idx) = content.find("  };\n\n  outputs = {") {
             content.insert_str(inputs_end_idx, &input_str);
@@ -85,8 +88,7 @@ pub fn add_external_input(
         }
     }
 
-    // 3. Pass the new alias down to the group imports in flake.nix
-    // e.g., changes { inherit pkgs; } into { inherit pkgs neovim; }
+    // 3. Pass the new alias down to the group imports
     let target_inherit = "{ inherit pkgs";
     if !content.contains(&format!("{} {}", target_inherit, alias)) {
         content = content.replace(target_inherit, &format!("{} {}", target_inherit, alias));
@@ -94,13 +96,11 @@ pub fn add_external_input(
 
     writer::write_content_to_file(&flake_path, &content)?;
 
-    // 4. Update the group's .nix file header to accept the new variable
-    // e.g., changes { pkgs, ... }: into { pkgs, neovim, ... }:
+    // 4. Update the group's .nix file header
     let group_path = config_dir.join(format!("groups/upstream/{}.nix", group));
     if group_path.exists() {
         let mut group_content = fs::read_to_string(&group_path)?;
         let target_header = "{ pkgs";
-        // Prevent duplicate injections
         if group_content.contains(target_header)
             && !group_content.contains(&format!("{},", alias))
             && !group_content.contains(&format!("{} ", alias))
@@ -108,6 +108,37 @@ pub fn add_external_input(
             group_content = group_content.replace(target_header, &format!("{{ pkgs, {}", alias));
             writer::write_content_to_file(&group_path, &group_content)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Surgically removes the 'follows' directive for a specific alias if a build fails
+pub fn remove_input_follows(config_dir: &Path, alias: &str) -> Result<(), RixError> {
+    let flake_path = config_dir.join("flake.nix");
+    
+    if !flake_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&flake_path)?;
+    let target_line = format!("{}.inputs.nixpkgs.follows", alias);
+
+    let mut new_content = String::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        // Drop the line completely if it contains our exact target
+        if line.contains(&target_line) {
+            modified = true;
+            continue;
+        }
+        new_content.push_str(line);
+        new_content.push('\n');
+    }
+
+    if modified {
+        writer::write_content_to_file(&flake_path, &new_content)?;
     }
 
     Ok(())

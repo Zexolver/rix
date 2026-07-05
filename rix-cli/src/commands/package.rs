@@ -64,6 +64,7 @@ pub fn handle_install(
     }
 
     let mut needs_upgrade = false;
+    let mut injected_aliases = Vec::new();
 
     for name in &packages {
         // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
@@ -75,6 +76,9 @@ pub fn handle_install(
 
             let uri = parser::normalize_flake_uri(&name);
             let alias = parser::infer_flake_alias(&uri);
+            
+            // Track this alias in case the optimistic build passes a bad check later
+            injected_aliases.push(alias.clone());
 
             println!("💉 Injecting flake input '{}' into flake.nix...", alias);
             if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
@@ -140,8 +144,34 @@ pub fn handle_install(
     if needs_upgrade {
         println!("Successfully optimized environment config changes!");
         println!("Applying environmental upgrade generations...");
+        
         if let Err(e) = ctx.apply_upgrade(false) {
-            eprintln!("Failed to apply target updates to environment: {:?}", e);
+            // Self-healing loop triggers if an upgrade fails and external flakes were involved
+            if !injected_aliases.is_empty() {
+                println!("\n⚠️ Environment upgrade failed. Initiating self-healing architecture...");
+                
+                for alias in &injected_aliases {
+                    println!("Surgically removing 'follows = \"nixpkgs\"' override for '{}' to use safe fallback...", alias);
+                    if let Err(err) = flake::remove_input_follows(&ctx.config_dir, alias) {
+                        eprintln!("Warning: Failed to scrub follows line for {}: {:?}", alias, err);
+                    }
+                }
+                
+                println!("Retrying environmental upgrade with safe legacy dependencies (this may take a moment)...");
+                if let Err(retry_e) = ctx.apply_upgrade(false) {
+                    eprintln!("Self-healing failed to resolve the build error: {:?}", retry_e);
+                    std::process::exit(1);
+                } else {
+                    println!("✅ Successfully updated environment generation via self-healing fallback!");
+                    let commit_msg = format!("rix: installed {} (with legacy self-healing fixes)", packages.join(", "));
+                    if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
+                        eprintln!("⚠ Warning: Failed to auto-commit changes: {:?}", e);
+                    }
+                }
+            } else {
+                eprintln!("Failed to apply target updates to environment: {:?}", e);
+                std::process::exit(1);
+            }
         } else {
             println!("✅ Successfully updated environment generation!");
 
