@@ -69,24 +69,24 @@ pub fn handle_install(
     for name in &packages {
         // 1. 🌐 INTERCEPT: Is this an external Flake URL or URI?
         if name.starts_with("http://") || name.starts_with("https://") || name.contains(':') {
-            println!(
-                "🌐 Detected external flake URI for '{}'. Normalizing...",
-                name
-            );
+            ui::print_info(&format!("Detected external flake URI: {}", name));
 
             let uri = parser::normalize_flake_uri(&name);
             let alias = parser::infer_flake_alias(&uri);
-            
-            // Track this alias in case the optimistic build passes a bad check later
+
             injected_aliases.push(alias.clone());
 
-            println!("💉 Injecting flake input '{}' into flake.nix...", alias);
+            let msg = Box::leak(
+                format!("Injecting flake input '{}'", alias).into_boxed_str(),
+            );
+            let spinner = ui::create_spinner(msg);
             if let Err(e) = flake::add_external_input(&ctx.config_dir, &alias, &uri, &group) {
-                eprintln!("Failed to inject flake input: {:?}", e);
+                spinner.finish_and_clear();
+                ui::print_error(&format!("Failed to inject flake input: {}", e));
                 std::process::exit(1);
             }
+            spinner.finish_and_clear();
 
-            // Wrap in parentheses to bypass the writer's auto-prefixing, and safely quote the architecture interpolation
             let pkg_expr = format!(
                 "__ext_flake or ({}.packages.${{pkgs.system}}.default)",
                 alias
@@ -95,7 +95,6 @@ pub fn handle_install(
                 .clone()
                 .unwrap_or_else(|| format!("External flake: {}", uri));
 
-            println!("📦 Adding package output to environment...");
             handlers::execute_add(
                 ctx,
                 Package {
@@ -135,64 +134,87 @@ pub fn handle_install(
             }
             Err(e) => {
                 spinner.finish_and_clear();
-                eprintln!("{:?}", e);
+                ui::print_error(&format!("Package verification failed: {}", e));
                 std::process::exit(1);
             }
         }
     }
 
     if needs_upgrade {
-        println!("Successfully optimized environment config changes!");
-        println!("Applying environmental upgrade generations...");
-        
+        ui::print_success("Environment config changes applied");
+
+        let spinner = ui::create_spinner("Applying environment upgrade");
+
         if let Err(e) = ctx.apply_upgrade(false) {
-            // Self-healing loop triggers if an upgrade fails and external flakes were involved
+            spinner.finish_and_clear();
+
             if !injected_aliases.is_empty() {
-                println!("\n⚠️ Environment upgrade failed. Initiating self-healing architecture...");
-                
+                ui::print_warning("Environment upgrade failed. Attempting self-healing...");
+
                 for alias in &injected_aliases {
-                    println!("Surgically removing 'follows = \"nixpkgs\"' override for '{}' to use safe fallback...", alias);
+                    let msg = Box::leak(
+                        format!(
+                            "Removing dependency override for '{}'",
+                            alias
+                        )
+                        .into_boxed_str(),
+                    );
+                    let spinner = ui::create_spinner(msg);
                     if let Err(err) = flake::remove_input_follows(&ctx.config_dir, alias) {
-                        eprintln!("Warning: Failed to scrub follows line for {}: {:?}", alias, err);
+                        spinner.finish_and_clear();
+                        ui::print_warning(&format!(
+                            "Failed to remove override for {}: {}",
+                            alias, err
+                        ));
+                    } else {
+                        spinner.finish_and_clear();
                     }
                 }
-                
-                println!("Retrying environmental upgrade with safe legacy dependencies (this may take a moment)...");
+
+                let spinner = ui::create_spinner("Retrying with legacy dependencies");
                 if let Err(retry_e) = ctx.apply_upgrade(false) {
-                    eprintln!("Self-healing failed to resolve the build error: {:?}", retry_e);
+                    spinner.finish_and_clear();
+                    ui::print_error(&format!(
+                        "Self-healing failed to resolve build error: {}",
+                        retry_e
+                    ));
                     std::process::exit(1);
                 } else {
-                    println!("✅ Successfully updated environment generation via self-healing fallback!");
-                    let commit_msg = format!("rix: installed {} (with legacy self-healing fixes)", packages.join(", "));
-                    if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
-                        eprintln!("⚠ Warning: Failed to auto-commit changes: {:?}", e);
+                    spinner.finish_with_message(
+                        "✓ Successfully updated via self-healing fallback".to_string()
+                    );
+                    let commit_msg = format!(
+                        "rix: installed {} (with legacy self-healing fixes)",
+                        packages.join(", ")
+                    );
+                    if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg)
+                    {
+                        ui::print_warning(&format!("Failed to auto-commit changes: {}", e));
                     }
                 }
             } else {
-                eprintln!("Failed to apply target updates to environment: {:?}", e);
+                ui::print_error(&format!("Failed to apply environment updates: {}", e));
                 std::process::exit(1);
             }
         } else {
-            println!("✅ Successfully updated environment generation!");
+            spinner.finish_with_message("✓ Environment successfully updated".to_string());
 
-            // Auto-commit the successfully installed packages
             let commit_msg = format!("rix: installed {}", packages.join(", "));
             if let Err(e) = rix_core::system::sync::auto_commit(&ctx.config_dir, &commit_msg) {
-                eprintln!("⚠ Warning: Failed to auto-commit changes: {:?}", e);
+                ui::print_warning(&format!("Failed to auto-commit changes: {}", e));
             }
         }
     }
 }
 
 pub fn handle_search(ctx: &RixContext, query: String) {
-    let spinner = ui::create_spinner("Searching local package database...");
+    let spinner = ui::create_spinner("Searching package database");
 
-    // Call the new highly optimized SQLite binding in rix-core
     match rix_core::verify::search_local_db(&ctx.config_dir, &query) {
         Ok(results) => {
             spinner.finish_and_clear();
             if results.is_empty() {
-                println!("No packages matched your query.");
+                println!("\nNo packages matched '{}'. Try a different search term.", query);
             } else {
                 println!(
                     "\n{:<35} {:<20} {}",
@@ -204,7 +226,6 @@ pub fn handle_search(ctx: &RixContext, query: String) {
                 for (path, version, desc) in results.iter().take(display_limit) {
                     let short_path = path.splitn(3, '.').nth(2).unwrap_or(path);
 
-                    // UTF-8 SAFE TRUNCATION
                     let clean_desc = if desc.len() > 40 {
                         let mut truncated = desc.chars().take(37).collect::<String>();
                         truncated.push_str("...");
@@ -226,9 +247,9 @@ pub fn handle_search(ctx: &RixContext, query: String) {
 
                 if results.len() > display_limit {
                     println!(
-                        "\n... and {} more results hidden. (Showing top {})",
-                        results.len() - display_limit,
-                        display_limit
+                        "\n✓ Showing {} of {} results. Add more filters to narrow down.",
+                        display_limit,
+                        results.len()
                     );
                 }
                 println!();
@@ -236,7 +257,7 @@ pub fn handle_search(ctx: &RixContext, query: String) {
         }
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("Database search failed: {:?}", e);
+            ui::print_error(&format!("Database search failed: {}", e));
             std::process::exit(1);
         }
     }
@@ -263,10 +284,12 @@ pub fn handle_purge(ctx: &RixContext, group: String) {
         elevate_privileges();
     }
 
-    println!("Purging profile group configuration layout '{}'...", group);
+    let msg = Box::leak(format!("Purging profile group '{}'", group).into_boxed_str());
+    let spinner = ui::create_spinner(msg);
     if let Err(e) = ctx.purge_group_profile(&group) {
-        eprintln!("Purge sequence failed: {:?}", e);
+        spinner.finish_and_clear();
+        ui::print_error(&format!("Failed to purge profile: {}", e));
         std::process::exit(1);
     }
-    println!("Successfully purged profile configuration!");
+    spinner.finish_with_message(format!("✓ Successfully purged profile group '{}'", group));
 }

@@ -1,4 +1,5 @@
 use super::elevate_privileges;
+use crate::ui;
 use rix_core::RixContext;
 
 pub fn handle_update(ctx: &RixContext) {
@@ -6,20 +7,17 @@ pub fn handle_update(ctx: &RixContext) {
         elevate_privileges();
     }
 
-    // Change working directory to the configuration directory so Nix executes against the correct flake context
     if let Err(e) = std::env::set_current_dir(&ctx.config_dir) {
-        eprintln!(
-            "⚠ Warning: Failed to switch to configuration directory: {:?}",
-            e
-        );
+        ui::print_warning(&format!("Failed to switch to configuration directory: {}", e));
     }
 
-    println!("Syncing package index state references from upstream repositories... 🤔");
+    let spinner = ui::create_spinner("Syncing package indexes");
     if let Err(e) = ctx.update_indexes() {
-        eprintln!("Update sequence failed: {:?}", e);
+        spinner.finish_and_clear();
+        ui::print_error(&format!("Failed to update indexes: {}", e));
         std::process::exit(1);
     }
-    println!("Upstream indexes updated successfully!");
+    spinner.finish_with_message("✓ Package indexes updated successfully".to_string());
 }
 
 pub fn handle_refresh(ctx: &RixContext) {
@@ -27,17 +25,16 @@ pub fn handle_refresh(ctx: &RixContext) {
         elevate_privileges();
     }
 
-    println!("Scanning system PCI interfaces for graphics hardware...\n");
+    let spinner = ui::create_spinner("Scanning hardware configuration");
 
     if let Err(e) = rix_core::ops::detect_and_lock_hardware(&ctx.config_dir) {
-        eprintln!("Error: Failed to generate hardware lockfile: {}", e);
+        spinner.finish_and_clear();
+        ui::print_error(&format!("Failed to generate hardware lockfile: {}", e));
         std::process::exit(1);
     }
 
-    println!("\nHardware profile synchronized successfully.");
-    println!(
-        "Note: This hardware state will automatically be injected the next time you modify your environment (e.g., via 'rix install')."
-    );
+    spinner.finish_with_message("✓ Hardware profile synchronized".to_string());
+    ui::print_info("Hardware will be injected automatically on next environment update");
 }
 
 pub fn handle_upgrade(ctx: &RixContext, dry_run: bool) {
@@ -45,28 +42,27 @@ pub fn handle_upgrade(ctx: &RixContext, dry_run: bool) {
         elevate_privileges();
     }
 
-    // Change working directory to the configuration directory so Nix builds against the correct flake context
     if let Err(e) = std::env::set_current_dir(&ctx.config_dir) {
-        eprintln!(
-            "⚠ Warning: Failed to switch to configuration directory: {:?}",
-            e
-        );
+        ui::print_warning(&format!("Failed to switch to configuration directory: {}", e));
     }
 
-    if dry_run {
-        println!("🔍 Executing dry-run upgrade preview...");
+    let msg = if dry_run {
+        "Performing dry-run upgrade preview"
     } else {
-        println!("Applying generational upgrade across declarative sets...");
-    }
+        "Applying environment upgrade"
+    };
+
+    let spinner = ui::create_spinner(msg);
 
     if let Err(e) = ctx.apply_upgrade(dry_run) {
-        eprintln!("Upgrade realization failed: {:?}", e);
+        spinner.finish_and_clear();
+        ui::print_error(&format!("Upgrade failed: {}", e));
         std::process::exit(1);
     }
 
     if dry_run {
-        println!("Dry-run complete. No system changes were applied.");
+        spinner.finish_with_message("✓ Dry-run complete - no system changes applied".to_string());
     } else {
-        println!("System configuration environment generation fully built!");
+        spinner.finish_with_message("✓ Environment upgrade complete".to_string());
     }
 }

@@ -16,7 +16,7 @@ pub fn handle_list(ctx: &RixContext) {
             ui::print_package_table(polished_packages);
         }
         Err(e) => {
-            eprintln!("Failed to retrieve packages: {:?}", e);
+            ui::print_error(&format!("Failed to retrieve packages: {}", e));
             std::process::exit(1);
         }
     }
@@ -84,21 +84,20 @@ pub fn handle_history(ctx: &RixContext) {
                 }
             } else {
                 let stderr_str = String::from_utf8_lossy(&output.stderr);
-                // If it fails because the repo isn't there yet, handle gracefully
                 if stderr_str.contains("not a git repository") {
-                    println!("No Git history initialized yet. Try running 'rix init'.");
+                    ui::print_info("No Git history initialized yet. Run 'rix init' to start tracking changes");
                 } else {
-                    eprintln!(
-                        "❌ Failed to read git history state after {:.2}s:\n{}",
+                    ui::print_error(&format!(
+                        "Failed to read git history after {:.2}s: {}",
                         duration.as_secs_f64(),
                         stderr_str
-                    );
+                    ));
                 }
             }
         }
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("Failed to execute git log sequence: {:?}", e);
+            ui::print_error(&format!("Failed to read git history: {}", e));
         }
     }
 }

@@ -4,17 +4,21 @@ mod config;
 mod handlers;
 mod ui;
 
-use clap::Parser; // Essential trait bound inclusion to unlock .parse()
+use clap::Parser;
 use rix_core::RixContext;
+use std::process;
 
 fn main() {
-    // 1. Parse standard input CLI argument states
-    let cli = args::Cli::parse();
+    if let Err(e) = run() {
+        eprintln!("Error: {}", e);
+        process::exit(1);
+    }
+}
 
-    // 2. Identify the system platform context pathing targets
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = args::Cli::parse();
     let config_dir = config::get_config_dir();
     let ctx = RixContext::new(config_dir);
-
-    // 3. Delegate execution directly to our operational router
     commands::handle(cli, ctx);
+    Ok(())
 }

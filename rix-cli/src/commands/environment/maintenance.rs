@@ -40,16 +40,16 @@ pub fn handle_clean(deep: bool) {
                 );
             } else {
                 let stderr_str = String::from_utf8_lossy(&output.stderr);
-                eprintln!(
-                    "❌ Cleanup sequence failed after {:.2}s:\n{}",
+                ui::print_error(&format!(
+                    "Cleanup sequence failed after {:.2}s: {}",
                     duration.as_secs_f64(),
                     stderr_str
-                );
+                ));
             }
         }
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("Failed to invoke Nix garbage collector: {:?}", e);
+            ui::print_error(&format!("Failed to invoke Nix garbage collector: {}", e));
         }
     }
 }
@@ -87,22 +87,21 @@ pub fn handle_rollback(ctx: &RixContext, target_state: Option<String>) {
         Ok(out) => out,
         Err(e) => {
             spinner.finish_and_clear();
-            eprintln!("❌ Failed to invoke git: {:?}", e);
+            ui::print_error(&format!("Failed to invoke git: {}", e));
             std::process::exit(1);
         }
     };
 
     if !restore_output.status.success() {
         spinner.finish_and_clear();
-        eprintln!(
-            "❌ Failed to restore git state from {}:\n{}",
+        ui::print_error(&format!(
+            "Failed to restore git state from {}: {}",
             target,
             String::from_utf8_lossy(&restore_output.stderr)
-        );
+        ));
         std::process::exit(1);
     }
 
-    // 3. Auto-commit the rollback so our Git history moves forward cleanly
     let commit_msg = match &target_state {
         Some(v) => format!("rix: rolled back declarative state to {}", v),
         None => "rix: rolled back declarative state to previous generation".to_string(),
@@ -111,23 +110,16 @@ pub fn handle_rollback(ctx: &RixContext, target_state: Option<String>) {
     commit_cmd
         .current_dir(&ctx.config_dir)
         .args(["commit", "-m", &commit_msg]);
-    let _ = commit_cmd.output(); // Silently commit
+    let _ = commit_cmd.output();
 
-    // 4. Re-apply the environment using modern flake evaluation!
-    // Because the older derivation is already in the Nix store, this will be lightning fast.
-    // It entirely bypasses legacy `nix-env` and keeps config files perfectly in sync with the system.
     if let Err(e) = ctx.apply_upgrade(false) {
         spinner.finish_and_clear();
-        eprintln!(
-            "❌ Failed to re-evaluate and apply rolled-back environment: {:?}",
-            e
-        );
+        ui::print_error(&format!("Failed to re-apply environment: {}", e));
         std::process::exit(1);
     }
 
-    spinner.finish_and_clear();
-    println!(
-        "⏪ Environment successfully rolled back and applied [finished in {:.2}s]",
+    spinner.finish_with_message(format!(
+        "✓ Environment successfully rolled back [finished in {:.2}s]",
         start_time.elapsed().as_secs_f64()
-    );
+    ));
 }
