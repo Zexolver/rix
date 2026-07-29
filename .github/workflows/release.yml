@@ -1,34 +1,80 @@
-name: Release Rix Binary
+name: Release
 
 on:
   push:
     tags:
-      - "v*.*.*" # Triggers only when you push a tag like v0.4.3
+      - '*'
+
+permissions:
+  contents: write
 
 jobs:
   build-and-release:
-    name: Build and Upload Release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # Needed to create the release
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_suffix: macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_suffix: macos-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_suffix: windows-x86_64.exe
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Rename binary for clarity (Optional)
-        run: mv target/release/rix-cli target/release/rix-x86_64-linux
-
-      - name: Create Release and Upload Binary
-        uses: softprops/action-gh-release@v2
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          generate_release_notes: true
-          files: target/release/rix-x86_64-linux
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          targets: ${{ matrix.target }}
+
+      - name: Build binaries
+        run: cargo build --release --bins --target ${{ matrix.target }}
+
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Copy rix binary
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp target/${{ matrix.target }}/release/rix.exe artifacts/rix-${{ matrix.artifact_suffix }}
+            cp target/${{ matrix.target }}/release/rix-tui.exe artifacts/rix-tui-${{ matrix.artifact_suffix }}
+          else
+            cp target/${{ matrix.target }}/release/rix artifacts/rix-${{ matrix.artifact_suffix }}
+            cp target/${{ matrix.target }}/release/rix-tui artifacts/rix-tui-${{ matrix.artifact_suffix }}
+          fi
+
+      - name: Strip binaries (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          strip artifacts/rix-* || true
+
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*
+
+  build-matrix:
+    name: Verify build on all platforms
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --lib
+
+      - name: Build all binaries
+        run: cargo build --release --bins

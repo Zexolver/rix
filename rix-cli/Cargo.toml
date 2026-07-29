@@ -3,6 +3,14 @@ name = "rix-cli"
 version = "0.5.0"
 edition = "2021"
 
+[[bin]]
+name = "rix"
+path = "src/bin/rix.rs"
+
+[[bin]]
+name = "rix-tui"
+path = "src/bin/rix-tui.rs"
+
 [dependencies]
 rix-core = { path = "../rix-core" }
 clap = { version = "4.4", features = ["derive"] }
