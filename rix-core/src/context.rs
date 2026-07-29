@@ -12,6 +12,7 @@ pub struct Package {
     pub is_local_recipe: bool,
 }
 
+#[derive(Clone)]
 pub struct RixContext {
     pub config_dir: PathBuf,
     pub is_system: bool,

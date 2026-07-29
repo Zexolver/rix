@@ -3,9 +3,11 @@ mod commands;
 mod config;
 mod handlers;
 mod ui;
+mod tui;
 
 use clap::Parser;
 use rix_core::RixContext;
+use std::env;
 use std::process;
 
 fn main() {
@@ -16,9 +18,17 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = args::Cli::parse();
+    let args: Vec<String> = env::args().collect();
+
     let config_dir = config::get_config_dir();
     let ctx = RixContext::new(config_dir);
-    commands::handle(cli, ctx);
+
+    if args.len() == 1 || (args.len() == 2 && args[1] == "tui") {
+        tui::run_tui(&ctx)?;
+    } else {
+        let cli = args::Cli::parse();
+        commands::handle(cli, ctx);
+    }
+
     Ok(())
 }
