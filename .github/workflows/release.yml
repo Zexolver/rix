@@ -15,8 +15,8 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and Release
+  build-desktop:
+    name: Build Desktop Binaries
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -41,21 +41,26 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build binaries
-        run: cargo build --release --bins --target ${{ matrix.target }}
+      - name: Build CLI and GUI
+        run: cargo build --release -p rix-cli --target ${{ matrix.target }}
+
+      - name: Build TUI
+        run: cargo build --release -p rix-tui --target ${{ matrix.target }}
 
       - name: Create artifacts directory
         run: mkdir -p artifacts
 
-      - name: Copy rix binary
+      - name: Copy binaries
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cp target/${{ matrix.target }}/release/rix.exe artifacts/rix-${{ matrix.artifact_suffix }}
             cp target/${{ matrix.target }}/release/rix-tui.exe artifacts/rix-tui-${{ matrix.artifact_suffix }}
+            cp target/${{ matrix.target }}/release/rix-gui.exe artifacts/rix-gui-${{ matrix.artifact_suffix }}
           else
             cp target/${{ matrix.target }}/release/rix artifacts/rix-${{ matrix.artifact_suffix }}
             cp target/${{ matrix.target }}/release/rix-tui artifacts/rix-tui-${{ matrix.artifact_suffix }}
+            cp target/${{ matrix.target }}/release/rix-gui artifacts/rix-gui-${{ matrix.artifact_suffix }}
           fi
 
       - name: Strip binaries (Linux/macOS)
@@ -68,27 +73,10 @@ jobs:
         with:
           files: artifacts/*
 
-  build-matrix:
-    name: Verify build on all platforms
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Run tests
-        run: cargo test --lib
-
-      - name: Build all binaries
-        run: cargo build --release --bins
-
-  build-android-release:
-    name: Build Android Release
+  build-android:
+    name: Build Android Binaries
     runs-on: ubuntu-latest
-    if: contains(github.ref, 'beta') || contains(github.ref, 'Reconstruct')
+    if: contains(github.ref, 'Android')
     strategy:
       matrix:
         include:
@@ -118,11 +106,11 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Build Android binary
+      - name: Build Android GUI binary
         env:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
-          cargo ndk -t ${{ matrix.arch }} -o ./android-build build --release --bin rix-gui
+          cargo ndk -t ${{ matrix.arch }} -o ./android-build build --release -p rix-cli --bin rix-gui
 
       - name: Create artifacts directory
         run: mkdir -p artifacts
@@ -133,10 +121,27 @@ jobs:
 
       - name: Strip binary
         run: |
-          strip artifacts/rix-gui-android-${{ matrix.arch }} || true
+          aarch64-linux-gnu-strip artifacts/rix-gui-android-${{ matrix.arch }} || strip artifacts/rix-gui-android-${{ matrix.arch }} || true
 
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v1
         with:
           files: artifacts/*
-          prerelease: ${{ contains(github.ref, 'beta') }}
+          prerelease: true
+
+  verify-build:
+    name: Verify Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --lib
+
+      - name: Build all binaries
+        run: cargo build --release --workspace

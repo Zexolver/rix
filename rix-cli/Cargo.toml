@@ -8,10 +8,6 @@ name = "rix"
 path = "src/bin/rix.rs"
 
 [[bin]]
-name = "rix-tui"
-path = "src/bin/rix-tui.rs"
-
-[[bin]]
 name = "rix-gui"
 path = "src/bin/rix-gui.rs"
 

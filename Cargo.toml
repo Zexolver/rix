@@ -3,5 +3,6 @@
 members = [
     "rix-core",
     "rix-cli",
+    "rix-tui",
 ]
 resolver = "2"
