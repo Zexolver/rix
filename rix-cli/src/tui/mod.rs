@@ -1,7 +1,7 @@
-mod app;
+pub mod app;
 mod ui;
 mod events;
-mod screens;
+pub mod screens;
 
 pub use app::TuiApp;
 pub use events::EventHandler;

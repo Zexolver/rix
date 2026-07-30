@@ -1,4 +1,3 @@
-use rix_cli::tui::app::TuiApp;
 use rix_core::RixContext;
 use std::process;
 
@@ -9,12 +8,8 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> std::io::Result<()> {
     let config_dir = rix_cli::config::get_config_dir();
     let ctx = RixContext::new(config_dir);
-
-    let mut app = TuiApp::new(ctx)?;
-    app.run()?;
-
-    Ok(())
+    rix_cli::tui::run_tui(&ctx)
 }
