@@ -1,0 +1,58 @@
+name: Build All Linux Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: 'Release ID to upload to (e.g., 362640062)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-binaries:
+    name: Build All Linux Binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude-slint-android
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build all binaries
+        run: cargo build --release --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Copy binaries
+        run: |
+          cp target/x86_64-unknown-linux-gnu/release/rix artifacts/rix-linux-x86_64
+          cp target/x86_64-unknown-linux-gnu/release/rix-tui artifacts/rix-tui-linux-x86_64
+          cp target/x86_64-unknown-linux-gnu/release/rix-gui artifacts/rix-gui-linux-x86_64
+
+      - name: Strip binaries
+        run: |
+          strip artifacts/rix-linux-x86_64 || true
+          strip artifacts/rix-tui-linux-x86_64 || true
+          strip artifacts/rix-gui-linux-x86_64 || true
+
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in artifacts/*; do
+            echo "Uploading $(basename $file)..."
+            curl -X POST \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$file" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ inputs.release_id }}/assets?name=$(basename $file)"
+          done
