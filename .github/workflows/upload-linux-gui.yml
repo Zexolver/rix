@@ -1,0 +1,54 @@
+name: Upload Linux GUI Binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: 'Release ID to upload to (e.g., 362640062)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  upload-linux-gui:
+    name: Build and Upload Linux GUI
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude-slint-android
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build Linux GUI binary
+        run: cargo build --release -p rix-cli --bin rix-gui --target ${{ matrix.target }}
+
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Copy binary
+        run: cp target/${{ matrix.target }}/release/rix-gui artifacts/rix-gui-linux-x86_64
+
+      - name: Strip binary
+        run: strip artifacts/rix-gui-linux-x86_64 || true
+
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Uploading Linux GUI binary..."
+          curl -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"artifacts/rix-gui-linux-x86_64" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ inputs.release_id }}/assets?name=rix-gui-linux-x86_64"
