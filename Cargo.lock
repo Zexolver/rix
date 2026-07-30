@@ -4964,6 +4964,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rix-tui"
+version = "0.5.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "rix-cli",
+ "rix-core",
+ "tokio",
+]
+
+[[package]]
 name = "rnix"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
