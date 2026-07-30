@@ -1,0 +1,194 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, ListView } from "std-widgets.slint";
+
+export struct Package {
+    name: string,
+    group: string,
+    description: string,
+}
+
+export struct HistoryEntry {
+    state_num: int,
+    hash: string,
+    date: string,
+    message: string,
+    is_active: bool,
+}
+
+export component MainWindow inherits Window {
+    width: 480px;
+    height: 800px;
+    background: #f0f0f0;
+
+    callback show_packages_screen;
+    callback show_history_screen;
+    callback show_menu_screen;
+    callback install_package(string);
+    callback remove_package(string);
+    callback rollback_to_state(int);
+
+    in property <int> current_screen: 0;
+    in property <[Package]> packages;
+    in property <[HistoryEntry]> history;
+
+    VerticalBox {
+        padding: 20px;
+        spacing: 15px;
+
+        Rectangle {
+            height: 60px;
+            background: #00bcd4;
+            VerticalBox {
+                alignment: center;
+                Text {
+                    text: "Rix Package Manager";
+                    font-size: 24px;
+                    color: white;
+                }
+            }
+        }
+
+        if current_screen == 0: Rectangle {
+            background: white;
+            VerticalBox {
+                padding: 15px;
+                spacing: 10px;
+
+                Text {
+                    text: "Main Menu";
+                    font-size: 18px;
+                    color: #00bcd4;
+                }
+
+                Button {
+                    text: "Packages";
+                    clicked => { root.show_packages_screen(); }
+                }
+
+                Button {
+                    text: "History";
+                    clicked => { root.show_history_screen(); }
+                }
+
+                Button {
+                    text: "Update Indexes";
+                    clicked => {}
+                }
+
+                Button {
+                    text: "Settings";
+                    clicked => {}
+                }
+
+                Button {
+                    text: "Help";
+                    clicked => {}
+                }
+            }
+        }
+
+        if current_screen == 1: Rectangle {
+            background: white;
+            VerticalBox {
+                padding: 15px;
+                spacing: 10px;
+
+                Text {
+                    text: "Installed Packages";
+                    font-size: 18px;
+                    color: #00bcd4;
+                }
+
+                if packages.length == 0: Text {
+                    text: "No packages installed.";
+                    color: #666;
+                }
+
+                if packages.length > 0: ListView {
+                    height: 300px;
+                    for pkg in packages: Rectangle {
+                        height: 80px;
+                        background: #f9f9f9;
+                        VerticalBox {
+                            padding: 10px;
+                            Text { text: pkg.name; font-size: 14px; }
+                            Text { text: pkg.group; font-size: 12px; color: #666; }
+                            Text { text: pkg.description; font-size: 11px; color: #999; }
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 10px;
+                    input := LineEdit {
+                        placeholder-text: "Package name...";
+                    }
+                    Button {
+                        text: "Install";
+                        clicked => {
+                            root.install_package(input.text);
+                            input.text = "";
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Back";
+                    clicked => { root.show_menu_screen(); }
+                }
+            }
+        }
+
+        if current_screen == 2: Rectangle {
+            background: white;
+            VerticalBox {
+                padding: 15px;
+                spacing: 10px;
+
+                Text {
+                    text: "Environment History";
+                    font-size: 18px;
+                    color: #00bcd4;
+                }
+
+                if history.length == 0: Text {
+                    text: "No history available.";
+                    color: #666;
+                }
+
+                if history.length > 0: ListView {
+                    height: 350px;
+                    for entry in history: Rectangle {
+                        height: 100px;
+                        background: entry.is_active ? #e3f2fd : #f9f9f9;
+                        VerticalBox {
+                            padding: 10px;
+                            Text {
+                                text: (entry.is_active ? "ACTIVE " : "INACTIVE ") + "State " + entry.state_num;
+                                font-size: 14px;
+                                            color: #333;
+                            }
+                            Text { text: entry.message; font-size: 12px; }
+                            Text { text: entry.hash + " • " + entry.date; font-size: 10px; color: #999; }
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 10px;
+                    Button {
+                        text: "Rollback";
+                        clicked => {
+                            if history.length > 1 {
+                                root.rollback_to_state(history[1].state_num);
+                            }
+                        }
+                    }
+                    Button {
+                        text: "Back";
+                        clicked => { root.show_menu_screen(); }
+                    }
+                }
+            }
+        }
+    }
+}
